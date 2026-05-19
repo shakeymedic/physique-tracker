@@ -228,32 +228,51 @@ function TodayTab({ uid }) {
 // ── Macros calculator ─────────────────────────────────────────────────────────
 // Goal-driven: user picks a target rate of weight change (kg/week) and we work out
 // the daily kcal delta from the 7700 kcal-per-kg-of-fat heuristic, capping the
-// rate to safe ranges (≤1% bodyweight/week loss; ≤0.5% gain). Then macros are
-// computed from LBM (protein 2.2 g/kg LBM, fat 25% kcal, carbs fill).
+// rate to safe ranges (≤1% bodyweight/week loss; ≤0.5% gain). Macros are
+// computed from user-customisable preferences: protein g/kg bodyweight,
+// fat % of total kcal, with carbs filling the remainder. Kcal floor is user-set.
+const DEFAULT_PROTEIN_BASIS = 'bodyweight' // 'bodyweight' | 'lbm'
+const DEFAULT_PROTEIN_PER_KG = 2.0
+const DEFAULT_FAT_PCT = 25
+const DEFAULT_KCAL_FLOOR = 1500
+
 function MacrosTab({ uid }) {
   const [form, setForm] = useState({
     weight: '', bodyfat: '', activity: 1.55,
     goalType: 'lose', // 'lose' | 'maintain' | 'gain'
     rateKgPerWeek: 0.5,
     targetWeight: '',
+    // Personalisation
+    proteinBasis: DEFAULT_PROTEIN_BASIS,
+    proteinPerKg: DEFAULT_PROTEIN_PER_KG,
+    fatPct: DEFAULT_FAT_PCT,
+    kcalFloor: DEFAULT_KCAL_FLOOR,
   })
   const [result, setResult] = useState(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
-  // pre-fill from latest weight on mount
+  // pre-fill from latest weight + saved macro prefs on mount
   useEffect(() => {
     let alive = true
     ;(async () => {
       const { getAll } = await import('../data.js')
-      const rows = await getAll(uid, 'weights', { orderByField: 'date', dir: 'desc' })
-      if (alive && rows.length > 0) {
-        setForm(p => ({
-          ...p,
-          weight: p.weight || String(rows[0].weight ?? ''),
-          bodyfat: p.bodyfat || (rows[0].bodyfat ? String(rows[0].bodyfat) : ''),
-        }))
-      }
+      const [rows, settings] = await Promise.all([
+        getAll(uid, 'weights', { orderByField: 'date', dir: 'desc' }),
+        getSettings(uid),
+      ])
+      if (!alive) return
+      const prefs = settings.macroPrefs || {}
+      setForm(p => ({
+        ...p,
+        weight: p.weight || (rows[0]?.weight != null ? String(rows[0].weight) : ''),
+        bodyfat: p.bodyfat || (rows[0]?.bodyfat ? String(rows[0].bodyfat) : ''),
+        proteinBasis: prefs.proteinBasis ?? DEFAULT_PROTEIN_BASIS,
+        proteinPerKg: prefs.proteinPerKg ?? DEFAULT_PROTEIN_PER_KG,
+        fatPct: prefs.fatPct ?? DEFAULT_FAT_PCT,
+        kcalFloor: prefs.kcalFloor ?? DEFAULT_KCAL_FLOOR,
+      }))
     })()
     return () => { alive = false }
   }, [uid])
@@ -284,13 +303,35 @@ function MacrosTab({ uid }) {
     const dailyDelta = (form.goalType === 'lose' ? -1 : form.goalType === 'gain' ? 1 : 0) * (cappedRate * 7700 / 7)
     let kcal = Math.round(tdee + dailyDelta)
 
-    // Floor at BMR for safety (never below resting metabolic needs)
-    const floor = Math.round(bmr)
-    if (kcal < floor) { kcal = floor; warning = (warning ? warning + ' ' : '') + `Kcal floored at BMR (${floor}).` }
+    // Floor: use user's kcal floor (default 1500), but never below BMR if user-set floor is
+    // unrealistically low. We respect the higher of (user floor, BMR).
+    const userFloor = parseFloat(form.kcalFloor) || DEFAULT_KCAL_FLOOR
+    const bmrFloor = Math.round(bmr)
+    const effectiveFloor = Math.max(userFloor, bmrFloor)
+    if (kcal < effectiveFloor) {
+      kcal = effectiveFloor
+      const reason = userFloor > bmrFloor
+        ? `Kcal floored at your minimum (${userFloor}).`
+        : `Kcal floored at BMR (${bmrFloor}). Your floor of ${userFloor} is below BMR.`
+      warning = (warning ? warning + ' ' : '') + reason
+    }
 
-    const protein = Math.round(lbm * 2.2)
-    const fat = Math.round((kcal * 0.25) / 9)
+    // Protein: based on bodyweight or LBM, multiplied by g/kg preference
+    const proteinPerKg = parseFloat(form.proteinPerKg) || DEFAULT_PROTEIN_PER_KG
+    const proteinBase = form.proteinBasis === 'lbm' ? lbm : w
+    const protein = Math.round(proteinBase * proteinPerKg)
+
+    // Fat: percentage of total kcal
+    const fatPct = parseFloat(form.fatPct) || DEFAULT_FAT_PCT
+    const fat = Math.round((kcal * (fatPct / 100)) / 9)
+
+    // Carbs fill the remainder
     const carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4))
+
+    // Sanity: if protein + fat alone exceed kcal target, flag it
+    if (protein * 4 + fat * 9 > kcal) {
+      warning = (warning ? warning + ' ' : '') + `Protein + fat alone exceed your kcal target — carbs set to 0. Consider lowering protein g/kg or fat %.`
+    }
 
     // Time to target (if set)
     let timeToTarget = null
@@ -304,6 +345,7 @@ function MacrosTab({ uid }) {
     setResult({
       bmr: Math.round(bmr), tdee: Math.round(tdee), kcal,
       protein, carbs, fat,
+      proteinBase: form.proteinBasis, proteinPerKg, fatPct,
       cappedRate, dailyDelta: Math.round(dailyDelta), warning, timeToTarget,
     })
   }
@@ -319,6 +361,12 @@ function MacrosTab({ uid }) {
           rateKgPerWeek: result.cappedRate,
           targetWeight: form.targetWeight ? parseFloat(form.targetWeight) : null,
           updatedAt: new Date().toISOString(),
+        },
+        macroPrefs: {
+          proteinBasis: form.proteinBasis,
+          proteinPerKg: parseFloat(form.proteinPerKg) || DEFAULT_PROTEIN_PER_KG,
+          fatPct: parseFloat(form.fatPct) || DEFAULT_FAT_PCT,
+          kcalFloor: parseFloat(form.kcalFloor) || DEFAULT_KCAL_FLOOR,
         },
       })
       setSaved(true)
@@ -373,6 +421,43 @@ function MacrosTab({ uid }) {
             </>
           )}
         </div>
+
+        {/* Advanced personalisation — collapsible */}
+        <button type="button" onClick={() => setShowAdvanced(s => !s)}
+          className="text-xs text-muted hover:text-text mb-3 flex items-center gap-1">
+          {showAdvanced ? '▾' : '▸'} Advanced preferences (protein/fat targets, kcal floor)
+        </button>
+        {showAdvanced && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 p-3 bg-bg rounded-lg">
+            <div>
+              <label className="label">Protein basis</label>
+              <select className="input" value={form.proteinBasis}
+                onChange={e => setForm(p => ({ ...p, proteinBasis: e.target.value }))}>
+                <option value="bodyweight">Per kg bodyweight</option>
+                <option value="lbm">Per kg lean mass</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Protein (g/kg)</label>
+              <input type="number" step="0.1" min="0.5" max="4" className="input" value={form.proteinPerKg}
+                onChange={e => setForm(p => ({ ...p, proteinPerKg: e.target.value }))}/>
+            </div>
+            <div>
+              <label className="label">Fat (% of kcal)</label>
+              <input type="number" step="1" min="15" max="50" className="input" value={form.fatPct}
+                onChange={e => setForm(p => ({ ...p, fatPct: e.target.value }))}/>
+            </div>
+            <div>
+              <label className="label">Kcal floor</label>
+              <input type="number" step="50" min="1000" max="3000" className="input" value={form.kcalFloor}
+                onChange={e => setForm(p => ({ ...p, kcalFloor: e.target.value }))}/>
+            </div>
+            <p className="col-span-2 md:col-span-4 text-xs text-muted">
+              Defaults: 2.0 g/kg bodyweight protein, 25% fat, 1500 kcal floor. Saved with your targets.
+            </p>
+          </div>
+        )}
+
         <button onClick={calc} className="btn-primary">Calculate</button>
 
         {result && (
@@ -400,7 +485,7 @@ function MacrosTab({ uid }) {
                 <div className="text-accent font-bold text-2xl">{result.kcal}</div>
               </div>
               <div className="bg-bg rounded-lg p-3">
-                <div className="text-muted text-xs mb-1">Protein</div>
+                <div className="text-muted text-xs mb-1">Protein <span className="text-[10px]">({result.proteinPerKg}g/kg {result.proteinBase === 'lbm' ? 'LBM' : 'BW'})</span></div>
                 <div className="text-text font-semibold">{result.protein}g <span className="text-xs text-muted">({result.protein*4} kcal)</span></div>
               </div>
               <div className="bg-bg rounded-lg p-3">
@@ -408,7 +493,7 @@ function MacrosTab({ uid }) {
                 <div className="text-text font-semibold">{result.carbs}g <span className="text-xs text-muted">({result.carbs*4} kcal)</span></div>
               </div>
               <div className="bg-bg rounded-lg p-3">
-                <div className="text-muted text-xs mb-1">Fat</div>
+                <div className="text-muted text-xs mb-1">Fat <span className="text-[10px]">({result.fatPct}%)</span></div>
                 <div className="text-text font-semibold">{result.fat}g <span className="text-xs text-muted">({result.fat*9} kcal)</span></div>
               </div>
             </div>
