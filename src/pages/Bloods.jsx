@@ -1,0 +1,258 @@
+import { useEffect, useState } from 'react'
+import { useAuth } from '../auth.jsx'
+import { subscribe, addEntry, deleteEntry, getSettings } from '../data.js'
+import { format } from 'date-fns'
+import {
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine,
+} from 'recharts'
+import { AlertTriangle } from 'lucide-react'
+import { flag, RANGES } from '../clinical/ranges.js'
+
+const today = () => format(new Date(), 'yyyy-MM-dd')
+
+function FlagChip({ name, value, sex }) {
+  const f = flag(name, value, sex)
+  if (!f || value === '' || value === null || value === undefined) return null
+  const cls = { ok: 'chip-ok', warn: 'chip-warn', bad: 'chip-bad' }[f]
+  const label = { ok: '✓', warn: '!', bad: '✗' }[f]
+  return <span className={cls}>{label}</span>
+}
+
+function Tabs({ active, set }) {
+  return (
+    <div className="flex gap-2 mb-4 flex-wrap">
+      {['Log','Trends','Reference'].map(t => (
+        <button key={t} onClick={() => set(t)} className={active === t ? 'btn-primary' : 'btn-secondary'}>{t}</button>
+      ))}
+    </div>
+  )
+}
+
+function DisclaimerBanner() {
+  return (
+    <div className="flex items-start gap-3 bg-warn/10 border border-warn/30 rounded-xl p-3 mb-4">
+      <AlertTriangle size={18} className="text-warn shrink-0 mt-0.5"/>
+      <p className="text-sm text-warn">
+        Reference ranges are general guidance only — interpret with your doctor. This tool does not provide medical advice.
+      </p>
+    </div>
+  )
+}
+
+const BLOOD_FIELDS = [
+  { key: 'systolic',      label: 'Systolic BP',       unit: 'mmHg',         group: 'BP' },
+  { key: 'diastolic',     label: 'Diastolic BP',       unit: 'mmHg',         group: 'BP' },
+  { key: 'hr',            label: 'Heart Rate',         unit: 'bpm',          group: 'BP' },
+  { key: 'totalChol',     label: 'Total Cholesterol',  unit: 'mmol/L',       group: 'Lipids' },
+  { key: 'hdl',           label: 'HDL',                unit: 'mmol/L',       group: 'Lipids' },
+  { key: 'ldl',           label: 'LDL',                unit: 'mmol/L',       group: 'Lipids' },
+  { key: 'triglycerides', label: 'Triglycerides',      unit: 'mmol/L',       group: 'Lipids' },
+  { key: 'ast',           label: 'AST',                unit: 'U/L',          group: 'Liver' },
+  { key: 'alt',           label: 'ALT',                unit: 'U/L',          group: 'Liver' },
+  { key: 'ggt',           label: 'GGT',                unit: 'U/L',          group: 'Liver' },
+  { key: 'alp',           label: 'ALP',                unit: 'U/L',          group: 'Liver' },
+  { key: 'bilirubin',     label: 'Bilirubin',          unit: 'µmol/L',       group: 'Liver' },
+  { key: 'haemoglobin',   label: 'Haemoglobin',        unit: 'g/L',          group: 'Haem' },
+  { key: 'haematocrit',   label: 'Haematocrit',        unit: '%',            group: 'Haem' },
+  { key: 'hba1c',         label: 'HbA1c',              unit: 'mmol/mol',     group: 'Glucose' },
+  { key: 'fastingGlucose',label: 'Fasting Glucose',    unit: 'mmol/L',       group: 'Glucose' },
+  { key: 'egfr',          label: 'eGFR',               unit: 'mL/min/1.73m²',group: 'Renal' },
+  { key: 'creatinine',    label: 'Creatinine',         unit: 'µmol/L',       group: 'Renal' },
+]
+
+// ── Log ───────────────────────────────────────────────────────────────────────
+function LogTab({ uid, sex }) {
+  const [entries, setEntries] = useState([])
+  const [form, setForm] = useState({ date: today(), ...Object.fromEntries(BLOOD_FIELDS.map(f => [f.key, ''])) })
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => subscribe(uid, 'bloods', setEntries, { limit: 100 }), [uid])
+
+  const save = async (e) => {
+    e.preventDefault()
+    const data = { date: form.date }
+    BLOOD_FIELDS.forEach(f => { if (form[f.key] !== '') data[f.key] = parseFloat(form[f.key]) })
+    setSaving(true)
+    try {
+      await addEntry(uid, 'bloods', data)
+      setForm({ date: today(), ...Object.fromEntries(BLOOD_FIELDS.map(f => [f.key, ''])) })
+    } finally { setSaving(false) }
+  }
+
+  const groups = [...new Set(BLOOD_FIELDS.map(f => f.group))]
+
+  return (
+    <div className="space-y-4">
+      <div className="card">
+        <div className="card-title">Log Blood Results</div>
+        <form onSubmit={save}>
+          <div className="mb-4">
+            <label className="label">Date</label>
+            <input type="date" className="input max-w-xs" value={form.date}
+              onChange={e => setForm(p => ({ ...p, date: e.target.value }))}/>
+          </div>
+          {groups.map(grp => (
+            <div key={grp} className="mb-4">
+              <div className="text-xs font-semibold text-accent uppercase tracking-wide mb-2">{grp}</div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {BLOOD_FIELDS.filter(f => f.group === grp).map(f => (
+                  <div key={f.key}>
+                    <label className="label">{f.label} <span className="text-muted normal-case font-normal">({f.unit})</span></label>
+                    <input type="number" step="any" min="0" className="input"
+                      value={form[f.key]} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}/>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save Results'}</button>
+        </form>
+      </div>
+
+      <div className="card">
+        <div className="card-title">History</div>
+        {entries.length === 0 ? (
+          <p className="text-sm text-muted">No blood results logged yet.</p>
+        ) : entries.map(e => (
+          <div key={e.id} className="bg-bg rounded-lg p-3 mb-2">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium">{e.date}</span>
+              <button onClick={() => deleteEntry(uid, 'bloods', e.id)} className="btn-ghost p-1 text-danger">✕</button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {BLOOD_FIELDS.filter(f => e[f.key] !== undefined && e[f.key] !== null).map(f => (
+                <div key={f.key} className="flex items-center gap-1 text-xs">
+                  <span className="text-muted">{f.label}:</span>
+                  <span className="text-text">{e[f.key]}</span>
+                  <FlagChip name={f.key} value={e[f.key]} sex={sex}/>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Trends ────────────────────────────────────────────────────────────────────
+function TrendsTab({ uid, sex }) {
+  const [entries, setEntries] = useState([])
+  const [param, setParam] = useState('systolic')
+
+  useEffect(() => subscribe(uid, 'bloods', setEntries, { limit: 200 }), [uid])
+
+  const sorted = entries.filter(e => e[param] !== undefined && e[param] !== null)
+    .slice().sort((a, b) => a.date.localeCompare(b.date))
+  const chartData = sorted.map(e => ({ date: e.date.slice(5), value: parseFloat(e[param]) }))
+
+  const r = RANGES[param]
+  const rs = r ? (r['M'] || r[sex === 'F' ? 'F' : 'M']) : null
+
+  const refLines = []
+  if (rs) {
+    if (rs.ok) { refLines.push({ v: rs.ok[0], c: '#10b981' }); refLines.push({ v: rs.ok[1], c: '#10b981' }) }
+    if (rs.okMax) refLines.push({ v: rs.okMax, c: '#10b981' })
+    if (rs.okMin) refLines.push({ v: rs.okMin, c: '#10b981' })
+    if (rs.warnMax) refLines.push({ v: rs.warnMax, c: '#f59e0b' })
+    if (rs.warnMin) refLines.push({ v: rs.warnMin, c: '#f59e0b' })
+  }
+
+  const fieldInfo = BLOOD_FIELDS.find(f => f.key === param)
+
+  return (
+    <div className="space-y-4">
+      <div className="card">
+        <div className="card-title">Parameter</div>
+        <select className="input max-w-xs" value={param} onChange={e => setParam(e.target.value)}>
+          {BLOOD_FIELDS.map(f => <option key={f.key} value={f.key}>{f.label} ({f.unit})</option>)}
+        </select>
+      </div>
+      <div className="card">
+        <div className="card-title">{fieldInfo?.label} Trend</div>
+        {chartData.length < 2 ? (
+          <p className="text-sm text-muted">Not enough data for this parameter.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={chartData}>
+              <CartesianGrid stroke="#334155" strokeDasharray="3 3"/>
+              <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd"/>
+              <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} domain={['auto','auto']} width={36}/>
+              <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', color: '#f1f5f9' }}
+                formatter={(v) => [`${v} ${fieldInfo?.unit || ''}`, fieldInfo?.label]}/>
+              {refLines.map((rl, i) => (
+                <ReferenceLine key={i} y={rl.v} stroke={rl.c} strokeDasharray="4 2" strokeWidth={1}/>
+              ))}
+              <Line type="monotone" dataKey="value" stroke="#22d3ee" dot={{ r: 3, fill: '#22d3ee' }} strokeWidth={2}/>
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Reference ─────────────────────────────────────────────────────────────────
+function ReferenceTab() {
+  return (
+    <div className="card overflow-x-auto">
+      <div className="card-title">UK Reference Ranges</div>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left border-b border-border/40">
+            <th className="pb-2 text-muted font-medium">Marker</th>
+            <th className="pb-2 text-muted font-medium">Unit</th>
+            <th className="pb-2 text-success font-medium">OK</th>
+            <th className="pb-2 text-warn font-medium">Warn</th>
+            <th className="pb-2 text-danger font-medium">Bad</th>
+          </tr>
+        </thead>
+        <tbody>
+          {BLOOD_FIELDS.map(f => {
+            const rm = RANGES[f.key]?.['M']
+            if (!rm) return null
+            let ok = '—', warn = '—', bad = '—'
+            if (rm.ok) { ok = `${rm.ok[0]}–${rm.ok[1]}`; bad = `<${rm.ok[0]} or >${rm.ok[1]}` }
+            if (rm.okMax) { ok = `<${rm.okMax}`; bad = `>${rm.warnMax ?? rm.okMax}` }
+            if (rm.okMin) { ok = `>${rm.okMin}`; bad = `<${rm.warnMin ?? rm.okMin}` }
+            if (rm.warn) warn = `${rm.warn[0]}–${rm.warn[1]}`
+            if (rm.warnMax) warn = `${rm.okMax}–${rm.warnMax}`
+            if (rm.warnMin) warn = `${rm.warnMin}–${rm.okMin}`
+            return (
+              <tr key={f.key} className="border-b border-border/20">
+                <td className="py-2 text-text">{f.label}</td>
+                <td className="py-2 text-muted">{f.unit}</td>
+                <td className="py-2 text-success">{ok}</td>
+                <td className="py-2 text-warn">{warn}</td>
+                <td className="py-2 text-danger">{bad}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+      <p className="text-xs text-muted mt-3">Male ranges shown. Values may differ slightly between labs.</p>
+    </div>
+  )
+}
+
+export default function Bloods() {
+  const { user } = useAuth()
+  const uid = user?.uid
+  const [tab, setTab] = useState('Log')
+  const [sex, setSex] = useState('M')
+
+  useEffect(() => {
+    if (!uid) return
+    getSettings(uid).then(s => { if (s.sex) setSex(s.sex) })
+  }, [uid])
+
+  return (
+    <div>
+      <DisclaimerBanner/>
+      <Tabs active={tab} set={setTab}/>
+      {tab === 'Log' && <LogTab uid={uid} sex={sex}/>}
+      {tab === 'Trends' && <TrendsTab uid={uid} sex={sex}/>}
+      {tab === 'Reference' && <ReferenceTab/>}
+    </div>
+  )
+}
