@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../auth.jsx'
 import { subscribe, addEntry, setEntry, deleteEntry } from '../data.js'
 import { format } from 'date-fns'
-import { Pill, Plus, Trash2, CheckCircle, Circle, Activity } from 'lucide-react'
+import { Pill, Plus, Trash2, CheckCircle, Circle, Activity, Zap, Clock } from 'lucide-react'
 import { isMedDueToday, lastTakenDate, computeDrugLevel, steadyStateLevel, DOW_LABELS } from '../clinical/meds.js'
 import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from 'recharts'
 
@@ -34,6 +34,8 @@ export default function Medications() {
   const [saving, setSaving] = useState(false)
   const [editId, setEditId] = useState(null)
   const [tab, setTab] = useState('list') // 'list' | 'levels'
+  const [statForm, setStatForm] = useState(null) // null | object
+  const [catchupForMed, setCatchupForMed] = useState(null) // null | med object
 
   useEffect(() => {
     if (!uid) return
@@ -49,6 +51,38 @@ export default function Medications() {
   const markTaken = async (med) => {
     if (isTakenToday(med.id)) return
     await addEntry(uid, 'medicationLog', { date: todayStr, medId: med.id, name: med.name, dose: med.dose, unit: med.unit })
+  }
+
+  // Log a one-off / PRN / stat dose (e.g. paracetamol) — not tied to a scheduled medication.
+  // Stored in medicationLog with stat:true so it shows on history but never triggers the
+  // due-today flag and never shifts the schedule of an existing med.
+  const saveStatDose = async (data) => {
+    await addEntry(uid, 'medicationLog', {
+      stat: true,
+      outOfSchedule: true,
+      date: data.date,
+      name: data.name.trim(),
+      dose: data.dose,
+      unit: data.unit,
+      halfLifeHours: data.halfLifeHours ? parseFloat(data.halfLifeHours) : null,
+      notes: data.notes || '',
+    })
+    setStatForm(null)
+  }
+
+  // Log a catch-up / out-of-schedule dose for an EXISTING scheduled medication.
+  // The log entry is marked outOfSchedule:true so isMedDueToday / lastTakenDate ignore
+  // it when computing the next planned dose date.
+  const saveCatchupDose = async (med, date) => {
+    await addEntry(uid, 'medicationLog', {
+      medId: med.id,
+      outOfSchedule: true,
+      date,
+      name: med.name,
+      dose: med.dose,
+      unit: med.unit,
+    })
+    setCatchupForMed(null)
   }
 
   const resetForm = () => {
@@ -125,21 +159,30 @@ export default function Medications() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="card-title mb-0">Prescribed Medications</h2>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button onClick={() => setTab(tab === 'list' ? 'levels' : 'list')} className="btn-ghost text-sm">
             {tab === 'list' ? <><Activity size={14}/> Levels</> : 'Back to list'}
           </button>
           {tab === 'list' && (
-            <button onClick={() => { resetForm(); setShowForm(s => !s) }} className="btn-primary">
-              <Plus size={14}/> Add
-            </button>
+            <>
+              <button onClick={() => setStatForm({ name: '', dose: '', unit: 'mg', date: todayStr, halfLifeHours: '', notes: '' })}
+                className="btn-secondary text-sm">
+                <Zap size={14}/> Stat dose
+              </button>
+              <button onClick={() => { resetForm(); setShowForm(s => !s) }} className="btn-primary">
+                <Plus size={14}/> Add
+              </button>
+            </>
           )}
         </div>
       </div>
 
       <p className="text-xs text-muted -mt-2">For prescribed medications only. Always follow your doctor's instructions.</p>
+
+      {statForm && <StatDoseForm form={statForm} setForm={setStatForm} onSave={saveStatDose}/>}
+      {catchupForMed && <CatchupForm med={catchupForMed} onCancel={() => setCatchupForMed(null)} onSave={(date) => saveCatchupDose(catchupForMed, date)}/>}
 
       {tab === 'levels' && <LevelsTab meds={trackedMeds} logs={logs}/>}
 
@@ -241,7 +284,8 @@ export default function Medications() {
                 <div className="card">
                   <div className="card-title">Daily medications — today</div>
                   <MedList meds={daily} uid={uid} isTakenToday={isTakenToday}
-                    markTaken={markTaken} startEdit={startEdit}/>
+                    markTaken={markTaken} startEdit={startEdit}
+                    onCatchup={setCatchupForMed}/>
                 </div>
               )}
 
@@ -251,7 +295,8 @@ export default function Medications() {
                     <span className="chip-warn">Due today</span> Scheduled medications
                   </div>
                   <MedList meds={dueToday} uid={uid} isTakenToday={isTakenToday}
-                    markTaken={markTaken} startEdit={startEdit} variant="due"/>
+                    markTaken={markTaken} startEdit={startEdit} variant="due"
+                    onCatchup={setCatchupForMed}/>
                 </div>
               )}
 
@@ -270,6 +315,11 @@ export default function Medications() {
                           {med.notes && <div className="text-xs text-muted italic">{med.notes}</div>}
                         </div>
                         <div className="flex gap-2">
+                          {med.frequency !== 'asNeeded' && (
+                            <button onClick={() => setCatchupForMed(med)} className="btn-ghost p-1 text-xs" title="Log a missed/late dose">
+                              <Clock size={13}/>
+                            </button>
+                          )}
                           <button onClick={() => startEdit(med)} className="btn-ghost p-1 text-xs">Edit</button>
                           <button onClick={() => deleteEntry(uid, 'medications', med.id)} className="btn-ghost p-1 text-danger">
                             <Trash2 size={13}/>
@@ -280,6 +330,8 @@ export default function Medications() {
                   </div>
                 </div>
               )}
+
+              <RecentStatDoses logs={logs}/>
             </>
           )}
         </>
@@ -296,7 +348,7 @@ function frequencyDescription(med) {
   return med.frequency
 }
 
-function MedList({ meds, uid, isTakenToday, markTaken, startEdit, variant }) {
+function MedList({ meds, uid, isTakenToday, markTaken, startEdit, variant, onCatchup }) {
   return (
     <div className="space-y-2">
       {meds.map(med => {
@@ -317,10 +369,13 @@ function MedList({ meds, uid, isTakenToday, markTaken, startEdit, variant }) {
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
               {!taken && (
                 <button onClick={() => markTaken(med)} className="btn-secondary text-xs py-1">Mark taken</button>
               )}
+              <button onClick={() => onCatchup(med)} className="btn-ghost p-1 text-xs" title="Log a missed/late dose">
+                <Clock size={13}/>
+              </button>
               <button onClick={() => startEdit(med)} className="btn-ghost p-1 text-xs">Edit</button>
               <button onClick={() => deleteEntry(uid, 'medications', med.id)} className="btn-ghost p-1 text-danger">
                 <Trash2 size={13}/>
@@ -329,6 +384,110 @@ function MedList({ meds, uid, isTakenToday, markTaken, startEdit, variant }) {
           </div>
         )
       })}
+    </div>
+  )
+}
+
+// ── Stat / one-off / PRN dose form (e.g. paracetamol) ─────────────────────────
+function StatDoseForm({ form, setForm, onSave }) {
+  const submit = (e) => {
+    e.preventDefault()
+    if (!form.name || !form.dose) return
+    onSave(form)
+  }
+  return (
+    <div className="card border-accent/30">
+      <div className="card-title flex items-center gap-2">
+        <Zap size={16} className="text-accent"/> Log one-off / PRN dose
+      </div>
+      <p className="text-xs text-muted mb-3">For stat doses like paracetamol, ibuprofen, or anything taken outside a scheduled medication. Doesn’t need to be added as a full medication.</p>
+      <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="md:col-span-2">
+          <label className="label">Name *</label>
+          <input type="text" className="input" placeholder="e.g. Paracetamol"
+            value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}/>
+        </div>
+        <div>
+          <label className="label">Dose *</label>
+          <input type="text" className="input" placeholder="e.g. 1000"
+            value={form.dose} onChange={e => setForm(p => ({ ...p, dose: e.target.value }))}/>
+        </div>
+        <div>
+          <label className="label">Unit</label>
+          <select className="input" value={form.unit} onChange={e => setForm(p => ({ ...p, unit: e.target.value }))}>
+            {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="label">Date taken</label>
+          <input type="date" className="input" value={form.date}
+            onChange={e => setForm(p => ({ ...p, date: e.target.value }))}/>
+        </div>
+        <div>
+          <label className="label">Half-life (h, optional)</label>
+          <input type="number" step="0.1" min="0" className="input"
+            value={form.halfLifeHours} onChange={e => setForm(p => ({ ...p, halfLifeHours: e.target.value }))}/>
+        </div>
+        <div className="md:col-span-2">
+          <label className="label">Notes</label>
+          <input type="text" className="input" placeholder="e.g. headache"
+            value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}/>
+        </div>
+        <div className="md:col-span-2 flex gap-2">
+          <button type="submit" className="btn-primary">Log dose</button>
+          <button type="button" onClick={() => setForm(null)} className="btn-ghost">Cancel</button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+// ── Catch-up / out-of-schedule dose form for an existing scheduled med ──────
+function CatchupForm({ med, onSave, onCancel }) {
+  const [date, setDate] = useState(today())
+  return (
+    <div className="card border-warn/30">
+      <div className="card-title flex items-center gap-2">
+        <Clock size={16} className="text-warn"/> Log a catch-up / late dose: {med.name}
+      </div>
+      <p className="text-xs text-muted mb-3">
+        Use this if you took a dose outside the scheduled day (e.g. you were a day late). This is recorded in your dose history
+        and counted on the PK level chart, but <b>does not shift the next scheduled dose date.</b>
+      </p>
+      <div className="flex items-end gap-2">
+        <div className="flex-1">
+          <label className="label">Date taken</label>
+          <input type="date" className="input" value={date} onChange={e => setDate(e.target.value)}/>
+        </div>
+        <button onClick={() => onSave(date)} className="btn-primary">Log dose</button>
+        <button onClick={onCancel} className="btn-ghost">Cancel</button>
+      </div>
+    </div>
+  )
+}
+
+// ── Recent stat/one-off doses panel ───────────────────────────────────────
+function RecentStatDoses({ logs }) {
+  const stats = logs
+    .filter(l => l.stat)
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+    .slice(0, 10)
+  if (stats.length === 0) return null
+  return (
+    <div className="card">
+      <div className="card-title">Recent one-off doses</div>
+      <div className="space-y-1.5">
+        {stats.map(s => (
+          <div key={s.id} className="flex items-center justify-between bg-bg rounded-lg p-2 text-sm">
+            <div>
+              <span className="text-text font-medium">{s.name}</span>
+              <span className="text-muted"> · {s.dose}{s.unit}</span>
+              {s.notes && <span className="text-muted italic"> · {s.notes}</span>}
+            </div>
+            <span className="text-xs text-muted">{s.date && format(new Date(s.date), 'd MMM')}</span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

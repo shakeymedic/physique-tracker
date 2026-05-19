@@ -40,8 +40,22 @@ export function isMedDueToday(med, today, lastTaken) {
   }
 }
 
-/** Most recent log date (YYYY-MM-DD) for a med, or null. */
+/**
+ * Most recent SCHEDULED log date (YYYY-MM-DD) for a med, or null.
+ *
+ * Out-of-schedule / stat / catch-up doses (logs with `outOfSchedule: true`) are
+ * EXCLUDED here so the next-due calculation isn't shifted by a late dose.
+ * Use `lastAnyDoseDate` for the PK level chart which needs every dose.
+ */
 export function lastTakenDate(logs, medId) {
+  const relevant = logs
+    .filter(l => l.medId === medId && l.date && !l.outOfSchedule)
+    .sort((a, b) => b.date.localeCompare(a.date))
+  return relevant.length > 0 ? relevant[0].date : null
+}
+
+/** Most recent log date for a med INCLUDING out-of-schedule doses. */
+export function lastAnyDoseDate(logs, medId) {
   const relevant = logs
     .filter(l => l.medId === medId && l.date)
     .sort((a, b) => b.date.localeCompare(a.date))
