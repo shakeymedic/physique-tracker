@@ -8,6 +8,7 @@ import {
 import {
   Plus, Trash2, Play, Pause, RotateCcw, Trophy, Pencil, HeartPulse, Dumbbell, X,
   Timer, Activity, Zap, ChevronDown, ChevronRight, CheckCircle, Circle,
+  Copy, ArrowUp, ArrowDown, Save, Settings2, Calendar,
 } from 'lucide-react'
 import MicButton from '../components/MicButton.jsx'
 import EditableRow from '../components/EditableRow.jsx'
@@ -19,7 +20,7 @@ import { TodChip, TodSelect, detectTimeOfDay } from '../lib/timeOfDay.jsx'
 import { saveDraft, loadDraft, clearDraft, draftAgo } from '../lib/draft.js'
 import { ROUTINES } from '../training/routines.js'
 import { STRETCHES } from '../training/stretches.js'
-import { PROGRAMS, getProgramById, getTodayWorkout, computeWeekNumber } from '../training/programs.js'
+import { PROGRAMS, getProgramById, resolveProgram, getTodayWorkout, computeWeekNumber } from '../training/programs.js'
 import RoutineTimer from '../components/RoutineTimer.jsx'
 import ProgramCard from '../components/ProgramCard.jsx'
 import MilestoneRow from '../components/MilestoneRow.jsx'
@@ -816,6 +817,134 @@ function CardioTab({ uid }) {
   )
 }
 
+// ── Custom Routine Builder ─────────────────────────────────────────────────────
+function RoutineBuilder({ uid, initial = null, onSave, onCancel }) {
+  const blankStretch = () => ({ stretch: '', durationSec: 30 })
+  const [name, setName] = useState(initial?.name || '')
+  const [description, setDescription] = useState(initial?.description || '')
+  const [items, setItems] = useState(
+    initial?.stretches?.length ? initial.stretches.map(s => ({ ...s })) : [blankStretch()]
+  )
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+
+  const updateItem = (i, field, val) => setItems(prev => prev.map((s, idx) => idx === i ? { ...s, [field]: val } : s))
+  const addItem = () => setItems(prev => [...prev, blankStretch()])
+  const removeItem = (i) => setItems(prev => prev.filter((_, idx) => idx !== i))
+  const moveItem = (i, dir) => {
+    const next = [...items]
+    const swap = i + dir
+    if (swap < 0 || swap >= next.length) return
+    ;[next[i], next[swap]] = [next[swap], next[i]]
+    setItems(next)
+  }
+
+  const totalMin = Math.round(items.reduce((acc, s) => acc + (parseInt(s.durationSec) || 0), 0) / 60)
+
+  const handleSave = async () => {
+    if (!name.trim()) { setErr('Give the routine a name.'); return }
+    const validItems = items.filter(s => (s.stretch === '__custom' ? s.customName?.trim() : s.stretch?.trim()))
+    if (!validItems.length) { setErr('Add at least one stretch.'); return }
+    setSaving(true)
+    try {
+      const doc = {
+        name: name.trim(),
+        description: description.trim(),
+        durationMin: totalMin || 1,
+        stretches: validItems.map(s => ({
+          stretch: s.stretch === '__custom' ? (s.customName || 'Custom') : s.stretch,
+          durationSec: parseInt(s.durationSec) || 30,
+        })),
+      }
+      if (initial?.id) {
+        await setEntry(uid, 'customRoutines', initial.id, { ...doc, id: initial.id })
+        onSave({ ...doc, id: initial.id })
+      } else {
+        const ref = await addEntry(uid, 'customRoutines', doc)
+        onSave({ ...doc, id: ref.id })
+      }
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="card">
+        <div className="card-title flex items-center gap-2">
+          <Activity size={16} className="text-accent"/>
+          {initial ? 'Edit Routine' : 'New Routine'}
+        </div>
+
+        <div className="space-y-3 mb-4">
+          <div>
+            <label className="label">Name</label>
+            <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Morning Mobility"/>
+          </div>
+          <div>
+            <label className="label">Description <span className="text-muted">(optional)</span></label>
+            <input className="input" value={description} onChange={e => setDescription(e.target.value)} placeholder="What is this for?"/>
+          </div>
+        </div>
+
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-sm font-semibold text-text">Stretches</div>
+          <span className="text-xs text-muted">{totalMin} min total</span>
+        </div>
+
+        <div className="space-y-2 mb-3">
+          {items.map((item, i) => (
+            <div key={i} className="bg-surfaceAlt rounded-xl p-2 flex items-center gap-2">
+              <div className="flex flex-col gap-0.5">
+                <button onClick={() => moveItem(i, -1)} disabled={i === 0} className="btn-ghost p-0.5 disabled:opacity-30"><ArrowUp size={12}/></button>
+                <button onClick={() => moveItem(i, 1)} disabled={i === items.length - 1} className="btn-ghost p-0.5 disabled:opacity-30"><ArrowDown size={12}/></button>
+              </div>
+              <div className="flex-1 min-w-0">
+                <select
+                  className="input text-xs mb-1 w-full"
+                  value={item.stretch}
+                  onChange={e => updateItem(i, 'stretch', e.target.value)}
+                >
+                  <option value="">Pick stretch...</option>
+                  {STRETCHES.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
+                  <option value="__custom">Custom...</option>
+                </select>
+                {item.stretch === '__custom' && (
+                  <input className="input text-xs mb-1 w-full" placeholder="Stretch name"
+                    value={item.customName || ''}
+                    onChange={e => updateItem(i, 'customName', e.target.value)}
+                  />
+                )}
+              </div>
+              <div className="w-20 shrink-0">
+                <input
+                  type="number" className="input text-xs text-center"
+                  value={item.durationSec}
+                  min={5} step={5}
+                  onChange={e => updateItem(i, 'durationSec', e.target.value)}
+                />
+                <div className="text-xs text-muted text-center">sec</div>
+              </div>
+              <button onClick={() => removeItem(i)} className="btn-ghost p-1 text-danger shrink-0"><Trash2 size={13}/></button>
+            </div>
+          ))}
+        </div>
+
+        <button onClick={addItem} className="btn-secondary text-xs flex items-center gap-1 mb-4">
+          <Plus size={12}/> Add stretch
+        </button>
+
+        {err && <p className="text-xs text-danger mb-2">{err}</p>}
+
+        <div className="flex gap-2">
+          <button onClick={handleSave} className="btn-primary flex items-center gap-1" disabled={saving}>
+            <Save size={13}/> {saving ? 'Saving...' : 'Save routine'}
+          </button>
+          <button onClick={onCancel} className="btn-secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Mobility Tab ──────────────────────────────────────────────────────────────
 function MobilityTab({ uid }) {
   const [activeTimer, setActiveTimer] = useState(null)
@@ -823,10 +952,13 @@ function MobilityTab({ uid }) {
   const [customRoutines, setCustomRoutines] = useState([])
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState('')
+  const [building, setBuilding] = useState(false)
+  const [editingRoutine, setEditingRoutine] = useState(null)
 
   useEffect(() => {
-    subscribe(uid, 'mobilityLog', setMobilityLogs, { limit: 50 })
+    const unsub = subscribe(uid, 'mobilityLog', setMobilityLogs, { limit: 50 })
     getAll(uid, 'customRoutines').then(setCustomRoutines)
+    return unsub
   }, [uid])
 
   const allRoutines = [...ROUTINES, ...customRoutines]
@@ -844,6 +976,33 @@ function MobilityTab({ uid }) {
       setSaved(logData.routineName)
       setTimeout(() => setSaved(''), 3000)
     } finally { setSaving(false) }
+  }
+
+  const handleDeleteRoutine = async (r) => {
+    if (!confirm(`Delete "${r.name}"?`)) return
+    await deleteEntry(uid, 'customRoutines', r.id)
+    setCustomRoutines(prev => prev.filter(x => x.id !== r.id))
+  }
+
+  const handleRoutineSaved = (savedRoutine) => {
+    setCustomRoutines(prev => {
+      const idx = prev.findIndex(r => r.id === savedRoutine.id)
+      if (idx >= 0) { const n = [...prev]; n[idx] = savedRoutine; return n }
+      return [...prev, savedRoutine]
+    })
+    setBuilding(false)
+    setEditingRoutine(null)
+  }
+
+  if (building || editingRoutine) {
+    return (
+      <RoutineBuilder
+        uid={uid}
+        initial={editingRoutine}
+        onSave={handleRoutineSaved}
+        onCancel={() => { setBuilding(false); setEditingRoutine(null) }}
+      />
+    )
   }
 
   return (
@@ -866,36 +1025,50 @@ function MobilityTab({ uid }) {
 
       {/* Routines */}
       <div className="card">
-        <div className="card-title flex items-center gap-2">
-          <Activity size={16} className="text-accent"/> Mobility Routines
+        <div className="flex items-center justify-between mb-1">
+          <div className="card-title flex items-center gap-2">
+            <Activity size={16} className="text-accent"/> Mobility Routines
+          </div>
+          <button onClick={() => setBuilding(true)} className="btn-primary text-xs flex items-center gap-1">
+            <Plus size={12}/> New routine
+          </button>
         </div>
         <p className="text-xs text-muted mb-3">
-          Start a routine — the timer will guide you through each stretch automatically.
+          Start a routine — the timer guides you through each stretch automatically.
         </p>
         <div className="space-y-3">
-          {allRoutines.map(r => (
-            <div key={r.id} className="bg-surfaceAlt rounded-xl p-3">
-              <div className="flex items-start justify-between mb-1">
-                <div>
-                  <span className="font-medium text-text text-sm">{r.name}</span>
-                  {r.id && !ROUTINES.find(br => br.id === r.id) && (
-                    <span className="text-accent text-xs ml-2">Custom</span>
-                  )}
+          {allRoutines.map(r => {
+            const isCustom = !ROUTINES.find(br => br.id === r.id)
+            return (
+              <div key={r.id} className="bg-surfaceAlt rounded-xl p-3">
+                <div className="flex items-start justify-between mb-1">
+                  <div>
+                    <span className="font-medium text-text text-sm">{r.name}</span>
+                    {isCustom && <span className="text-accent text-xs ml-2">Custom</span>}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {isCustom && (
+                      <>
+                        <button onClick={() => setEditingRoutine(r)} className="btn-ghost p-1"><Pencil size={12}/></button>
+                        <button onClick={() => handleDeleteRoutine(r)} className="btn-ghost p-1 text-danger"><Trash2 size={12}/></button>
+                      </>
+                    )}
+                    <button
+                      onClick={() => setActiveTimer(r)}
+                      className="btn-primary text-xs flex items-center gap-1 ml-1 shrink-0"
+                    >
+                      <Play size={12}/> Start
+                    </button>
+                  </div>
                 </div>
-                <button
-                  onClick={() => setActiveTimer(r)}
-                  className="btn-primary text-xs flex items-center gap-1 ml-2 shrink-0"
-                >
-                  <Play size={12}/> Start
-                </button>
+                <p className="text-xs text-muted mb-1">{r.description}</p>
+                <div className="flex items-center gap-3 text-xs text-muted">
+                  <span><Timer size={11} className="inline mr-0.5"/>{r.durationMin} min</span>
+                  <span>{r.stretches?.length} stretches</span>
+                </div>
               </div>
-              <p className="text-xs text-muted mb-1">{r.description}</p>
-              <div className="flex items-center gap-3 text-xs text-muted">
-                <span><Timer size={11} className="inline mr-0.5"/>{r.durationMin} min</span>
-                <span>{r.stretches?.length} stretches</span>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
 
@@ -933,43 +1106,343 @@ function MobilityTab({ uid }) {
   )
 }
 
+// ── Custom Program Builder ─────────────────────────────────────────────────────
+const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const DIFFICULTY_OPTIONS = ['beginner', 'intermediate', 'advanced']
+const STYLE_OPTIONS = ['strength', 'hypertrophy', 'hybrid', 'endurance']
+
+function ProgramBuilder({ uid, initial = null, onSave, onCancel }) {
+  const { all: allExercises } = useExerciseList(uid)
+  const exerciseNames = allExercises.map(e => e.name)
+
+  const [name, setName] = useState(initial?.name || '')
+  const [description, setDescription] = useState(initial?.description || '')
+  const [difficulty, setDifficulty] = useState(initial?.difficulty || 'intermediate')
+  const [style, setStyle] = useState(initial?.style || 'strength')
+  const [durationWeeks, setDurationWeeks] = useState(initial?.durationWeeks || 8)
+  const [scheduleMode, setScheduleMode] = useState(initial?.scheduleMode || 'fixed')
+  const [progressionRule, setProgressionRule] = useState(initial?.progressionRule || '')
+
+  const blankWorkout = (key) => ({ key: key || `Day${Date.now()}`, name: '', type: 'strength', exercises: [], description: '', durationMin: 0 })
+  const [workouts, setWorkouts] = useState(() => {
+    if (initial?.workouts) {
+      return Object.entries(initial.workouts).map(([key, w]) => ({ key, ...w }))
+    }
+    return [blankWorkout('A')]
+  })
+
+  const [schedule, setSchedule] = useState(() => {
+    if (initial?.weeklySchedule?.length === 7) return [...initial.weeklySchedule]
+    return Array(7).fill('rest')
+  })
+
+  const blankMilestone = () => ({ id: `m-${Date.now()}`, name: '', exercise: '', multiplier: 1.0, reps: 5 })
+  const [milestones, setMilestones] = useState(initial?.milestones ? initial.milestones.map(m => ({ ...m })) : [])
+
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+  const [activeWorkoutIdx, setActiveWorkoutIdx] = useState(0)
+
+  const addWorkout = () => setWorkouts(prev => [...prev, blankWorkout()])
+  const removeWorkout = (i) => {
+    const key = workouts[i].key
+    setWorkouts(prev => prev.filter((_, idx) => idx !== i))
+    setSchedule(prev => prev.map(s => s === key ? 'rest' : s))
+    setActiveWorkoutIdx(0)
+  }
+  const updateWorkout = (i, field, val) => setWorkouts(prev => prev.map((w, idx) => idx === i ? { ...w, [field]: val } : w))
+
+  const blankExercise = () => ({ name: '', sets: 3, reps: '8-10', notes: '' })
+  const addExercise = (wi) => setWorkouts(prev => prev.map((w, i) => i === wi ? { ...w, exercises: [...(w.exercises || []), blankExercise()] } : w))
+  const removeExercise = (wi, ei) => setWorkouts(prev => prev.map((w, i) => i === wi ? { ...w, exercises: w.exercises.filter((_, j) => j !== ei) } : w))
+  const updateExercise = (wi, ei, field, val) => setWorkouts(prev => prev.map((w, i) => i === wi ? {
+    ...w, exercises: w.exercises.map((ex, j) => j === ei ? { ...ex, [field]: val } : ex)
+  } : w))
+  const moveExercise = (wi, ei, dir) => setWorkouts(prev => prev.map((w, i) => {
+    if (i !== wi) return w
+    const exs = [...w.exercises]
+    const swap = ei + dir
+    if (swap < 0 || swap >= exs.length) return w
+    ;[exs[ei], exs[swap]] = [exs[swap], exs[ei]]
+    return { ...w, exercises: exs }
+  }))
+
+  const updateMilestone = (i, field, val) => setMilestones(prev => prev.map((m, idx) => idx === i ? { ...m, [field]: val } : m))
+  const removeMilestone = (i) => setMilestones(prev => prev.filter((_, idx) => idx !== i))
+
+  const handleSave = async () => {
+    if (!name.trim()) { setErr('Give the program a name.'); return }
+    if (!workouts.some(w => w.name.trim())) { setErr('Name at least one workout day.'); return }
+    setSaving(true)
+    try {
+      const workoutsObj = {}
+      workouts.filter(w => w.name.trim()).forEach(w => {
+        const { key, ...rest } = w
+        workoutsObj[key] = { ...rest, name: rest.name.trim() }
+      })
+      const docData = {
+        name: name.trim(),
+        description: description.trim(),
+        difficulty,
+        style,
+        durationWeeks: parseInt(durationWeeks) || 8,
+        daysPerWeek: schedule.filter(s => s !== 'rest').length,
+        weeklySchedule: schedule,
+        scheduleMode,
+        progressionRule: progressionRule.trim(),
+        workouts: workoutsObj,
+        milestones: milestones.filter(m => m.name.trim()),
+        custom: true,
+      }
+      if (initial?.id) {
+        await setEntry(uid, 'customPrograms', initial.id, { ...docData, id: initial.id })
+        onSave({ ...docData, id: initial.id })
+      } else {
+        const ref = await addEntry(uid, 'customPrograms', docData)
+        onSave({ ...docData, id: ref.id })
+      }
+    } finally { setSaving(false) }
+  }
+
+  const activeW = workouts[activeWorkoutIdx] || workouts[0]
+
+  return (
+    <div className="space-y-4">
+      {/* Meta */}
+      <div className="card">
+        <div className="card-title flex items-center gap-2">
+          <Zap size={16} className="text-accent"/>
+          {initial?.id ? 'Edit Program' : 'New Program'}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-2">
+          <div>
+            <label className="label">Program name</label>
+            <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. My Upper/Lower Split"/>
+          </div>
+          <div>
+            <label className="label">Duration (weeks)</label>
+            <input type="number" className="input" value={durationWeeks} min={1} max={52} onChange={e => setDurationWeeks(e.target.value)}/>
+          </div>
+          <div>
+            <label className="label">Difficulty</label>
+            <select className="input" value={difficulty} onChange={e => setDifficulty(e.target.value)}>
+              {DIFFICULTY_OPTIONS.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Style</label>
+            <select className="input" value={style} onChange={e => setStyle(e.target.value)}>
+              {STYLE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="mb-3">
+          <label className="label">Description <span className="text-muted">(optional)</span></label>
+          <input className="input" value={description} onChange={e => setDescription(e.target.value)} placeholder="What's this program about?"/>
+        </div>
+        <div className="mb-3">
+          <label className="label">Schedule mode</label>
+          <div className="flex gap-2 mb-1">
+            {[['fixed', 'Fixed days'], ['sequential', 'Next in sequence']].map(([val, label]) => (
+              <button key={val} onClick={() => setScheduleMode(val)}
+                className={scheduleMode === val ? 'btn-primary text-xs' : 'btn-secondary text-xs'}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted">
+            {scheduleMode === 'fixed'
+              ? 'Mon = slot 1, Tue = slot 2, etc. Missing a day means missing that workout.'
+              : 'Next workout happens whenever you next train. Missed days carry over.'}
+          </p>
+        </div>
+        <div>
+          <label className="label">Progression rule <span className="text-muted">(optional)</span></label>
+          <input className="input" value={progressionRule} onChange={e => setProgressionRule(e.target.value)} placeholder="e.g. Add 2.5 kg when all reps completed"/>
+        </div>
+      </div>
+
+      {/* Workout day builder */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-3">
+          <div className="card-title flex items-center gap-2"><Dumbbell size={16} className="text-accent"/> Workout Days</div>
+          <button onClick={addWorkout} className="btn-primary text-xs flex items-center gap-1"><Plus size={12}/> Add day</button>
+        </div>
+        <div className="flex gap-1 flex-wrap mb-3">
+          {workouts.map((w, i) => (
+            <button key={i} onClick={() => setActiveWorkoutIdx(i)}
+              className={`text-xs px-3 py-1 rounded-lg ${activeWorkoutIdx === i ? 'bg-accent text-bg font-semibold' : 'bg-surfaceAlt text-muted'}`}>
+              {w.name || `Day ${i + 1}`}
+            </button>
+          ))}
+        </div>
+
+        {activeW && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="label">Day name</label>
+                <input className="input" value={activeW.name} onChange={e => updateWorkout(activeWorkoutIdx, 'name', e.target.value)} placeholder="e.g. Push A"/>
+              </div>
+              <div>
+                <label className="label">Type</label>
+                <select className="input" value={activeW.type || 'strength'} onChange={e => updateWorkout(activeWorkoutIdx, 'type', e.target.value)}>
+                  <option value="strength">Strength / Hypertrophy</option>
+                  <option value="cardio">Cardio</option>
+                  <option value="mobility">Mobility</option>
+                </select>
+              </div>
+            </div>
+
+            {(activeW.type === 'cardio' || activeW.type === 'mobility') ? (
+              <div className="space-y-2">
+                <div>
+                  <label className="label">Description</label>
+                  <input className="input" value={activeW.description || ''} onChange={e => updateWorkout(activeWorkoutIdx, 'description', e.target.value)} placeholder="e.g. 30 min Zone 2 run"/>
+                </div>
+                <div>
+                  <label className="label">Target duration (min)</label>
+                  <input type="number" className="input" value={activeW.durationMin || ''} onChange={e => updateWorkout(activeWorkoutIdx, 'durationMin', parseInt(e.target.value) || 0)}/>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-sm font-semibold text-text">Exercises</div>
+                  <button onClick={() => addExercise(activeWorkoutIdx)} className="btn-secondary text-xs flex items-center gap-1"><Plus size={11}/> Add</button>
+                </div>
+                <div className="space-y-2">
+                  {(activeW.exercises || []).map((ex, ei) => (
+                    <div key={ei} className="bg-surfaceAlt rounded-xl p-2 flex items-center gap-2">
+                      <div className="flex flex-col gap-0.5">
+                        <button onClick={() => moveExercise(activeWorkoutIdx, ei, -1)} disabled={ei === 0} className="btn-ghost p-0.5 disabled:opacity-30"><ArrowUp size={11}/></button>
+                        <button onClick={() => moveExercise(activeWorkoutIdx, ei, 1)} disabled={ei === (activeW.exercises?.length || 0) - 1} className="btn-ghost p-0.5 disabled:opacity-30"><ArrowDown size={11}/></button>
+                      </div>
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <select className="input text-xs w-full" value={ex.name} onChange={e => updateExercise(activeWorkoutIdx, ei, 'name', e.target.value)}>
+                          <option value="">Pick exercise...</option>
+                          {exerciseNames.map(n => <option key={n} value={n}>{n}</option>)}
+                        </select>
+                        <div className="flex gap-1">
+                          <input type="number" className="input text-xs w-16" placeholder="Sets" min={1} value={ex.sets} onChange={e => updateExercise(activeWorkoutIdx, ei, 'sets', parseInt(e.target.value) || 1)}/>
+                          <input className="input text-xs flex-1" placeholder="Reps e.g. 5 or 8-10" value={ex.reps} onChange={e => updateExercise(activeWorkoutIdx, ei, 'reps', e.target.value)}/>
+                          <input className="input text-xs flex-1" placeholder="Notes" value={ex.notes || ''} onChange={e => updateExercise(activeWorkoutIdx, ei, 'notes', e.target.value)}/>
+                        </div>
+                      </div>
+                      <button onClick={() => removeExercise(activeWorkoutIdx, ei)} className="btn-ghost p-1 text-danger shrink-0"><Trash2 size={13}/></button>
+                    </div>
+                  ))}
+                  {!activeW.exercises?.length && <p className="text-xs text-muted">No exercises yet.</p>}
+                </div>
+              </div>
+            )}
+
+            {workouts.length > 1 && (
+              <button onClick={() => removeWorkout(activeWorkoutIdx)} className="btn-danger text-xs flex items-center gap-1">
+                <Trash2 size={12}/> Remove this day
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Weekly schedule */}
+      <div className="card">
+        <div className="card-title flex items-center gap-2"><Calendar size={16} className="text-accent"/> Weekly Schedule</div>
+        <p className="text-xs text-muted mb-3">Assign a workout to each day, or leave as rest. Only matters in Fixed days mode.</p>
+        <div className="grid grid-cols-7 gap-1">
+          {DAY_LABELS.map((day, i) => (
+            <div key={i} className="flex flex-col items-center gap-1">
+              <div className="text-xs text-muted">{day}</div>
+              <select
+                className="input text-xs p-1 text-center w-full"
+                value={schedule[i]}
+                onChange={e => setSchedule(prev => prev.map((s, j) => j === i ? e.target.value : s))}
+              >
+                <option value="rest">Rest</option>
+                {workouts.filter(w => w.name.trim()).map(w => (
+                  <option key={w.key} value={w.key}>{w.name}</option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Milestones */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-3">
+          <div className="card-title flex items-center gap-2"><Trophy size={16} className="text-warn"/> Milestones <span className="text-muted text-xs">(optional)</span></div>
+          <button onClick={() => setMilestones(prev => [...prev, blankMilestone()])} className="btn-secondary text-xs flex items-center gap-1"><Plus size={11}/> Add</button>
+        </div>
+        {milestones.length === 0 && <p className="text-xs text-muted">No milestones set.</p>}
+        {milestones.map((m, i) => (
+          <div key={m.id} className="bg-surfaceAlt rounded-xl p-2 mb-2 space-y-1">
+            <div className="flex gap-2">
+              <input className="input text-xs flex-1" placeholder="e.g. Squat bodyweight x 5" value={m.name} onChange={e => updateMilestone(i, 'name', e.target.value)}/>
+              <button onClick={() => removeMilestone(i)} className="btn-ghost p-1 text-danger"><Trash2 size={13}/></button>
+            </div>
+            <div className="flex gap-1 flex-wrap">
+              <select className="input text-xs" value={m.exercise || ''} onChange={e => updateMilestone(i, 'exercise', e.target.value)}>
+                <option value="">Exercise...</option>
+                {exerciseNames.map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+              <input type="number" className="input text-xs w-24" placeholder="BW mult e.g. 1.5" step={0.25} value={m.multiplier} onChange={e => updateMilestone(i, 'multiplier', parseFloat(e.target.value) || 1)}/>
+              <input type="number" className="input text-xs w-16" placeholder="Reps" min={1} value={m.reps} onChange={e => updateMilestone(i, 'reps', parseInt(e.target.value) || 1)}/>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {err && <p className="text-xs text-danger">{err}</p>}
+      <div className="flex gap-2 flex-wrap">
+        <button onClick={handleSave} className="btn-primary flex items-center gap-1" disabled={saving}>
+          <Save size={13}/> {saving ? 'Saving...' : (initial?.id ? 'Save changes' : 'Create program')}
+        </button>
+        <button onClick={onCancel} className="btn-secondary">Cancel</button>
+      </div>
+    </div>
+  )
+}
+
 // ── Programs Tab ──────────────────────────────────────────────────────────────
 function ProgramsTab({ uid }) {
   const [settings, setSettings] = useState({})
   const [lifts, setLifts] = useState([])
   const [weights, setWeights] = useState([])
-  const [cardioLogs, setCardioLogs] = useState([])
-  const [mobilityLogs, setMobilityLogs] = useState([])
   const [customPrograms, setCustomPrograms] = useState([])
   const [viewProgram, setViewProgram] = useState(null)
+  const [building, setBuilding] = useState(false)
+  const [editingProgram, setEditingProgram] = useState(null)
   const [startDate, setStartDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     getSettings(uid).then(setSettings)
-    subscribe(uid, 'lifts', data => setLifts(data.map(normaliseLift)), { limit: 500 })
-    subscribe(uid, 'weights', setWeights, { limit: 90 })
-    subscribe(uid, 'cardio', setCardioLogs, { limit: 200 })
-    subscribe(uid, 'mobilityLog', setMobilityLogs, { limit: 200 })
+    const u1 = subscribe(uid, 'lifts', data => setLifts(data.map(normaliseLift)), { limit: 500 })
+    const u2 = subscribe(uid, 'weights', setWeights, { limit: 90 })
     getAll(uid, 'customPrograms').then(setCustomPrograms)
+    return () => { u1(); u2() }
   }, [uid])
 
   const activeProgram = settings.activeProgram || null
-  const activeProgramDef = activeProgram ? getProgramById(activeProgram.id) : null
+  const activeProgramDef = activeProgram ? resolveProgram(activeProgram.id, customPrograms) : null
 
-  const startProgram = async (program, startDate) => {
+  const startProgram = async (program, sd) => {
     setSaving(true)
     try {
       const newActive = {
         id: program.id,
-        startDate: startDate || format(new Date(), 'yyyy-MM-dd'),
+        startDate: sd || format(new Date(), 'yyyy-MM-dd'),
         weekNumber: 1,
+        scheduleMode: program.scheduleMode || 'fixed',
         customisations: {},
         completedSessions: {},
         customMilestones: [],
       }
       await saveSettings(uid, { activeProgram: newActive })
       setSettings(prev => ({ ...prev, activeProgram: newActive }))
+      setViewProgram(null)
     } finally { setSaving(false) }
   }
 
@@ -982,20 +1455,82 @@ function ProgramsTab({ uid }) {
     } finally { setSaving(false) }
   }
 
+  const markSessionDone = async () => {
+    if (!activeProgram || !activeProgramDef) return
+    const todayStr = format(new Date(), 'yyyy-MM-dd')
+    const todayWorkoutKey = getTodayWorkout(activeProgramDef, activeProgram)
+    const updated = {
+      ...activeProgram,
+      completedSessions: {
+        ...(activeProgram.completedSessions || {}),
+        [todayStr]: todayWorkoutKey,
+      },
+    }
+    await saveSettings(uid, { activeProgram: updated })
+    setSettings(prev => ({ ...prev, activeProgram: updated }))
+  }
+
+  const toggleScheduleMode = async () => {
+    if (!activeProgram) return
+    const newMode = (activeProgram.scheduleMode || 'fixed') === 'fixed' ? 'sequential' : 'fixed'
+    const updated = { ...activeProgram, scheduleMode: newMode }
+    await saveSettings(uid, { activeProgram: updated })
+    setSettings(prev => ({ ...prev, activeProgram: updated }))
+  }
+
+  const handleProgramSaved = (savedProg) => {
+    setCustomPrograms(prev => {
+      const idx = prev.findIndex(p => p.id === savedProg.id)
+      if (idx >= 0) { const n = [...prev]; n[idx] = savedProg; return n }
+      return [...prev, savedProg]
+    })
+    setBuilding(false)
+    setEditingProgram(null)
+  }
+
+  const handleDeleteProgram = async (p) => {
+    if (!confirm(`Delete "${p.name}"?`)) return
+    await deleteEntry(uid, 'customPrograms', p.id)
+    setCustomPrograms(prev => prev.filter(x => x.id !== p.id))
+    if (activeProgram?.id === p.id) {
+      await saveSettings(uid, { activeProgram: null })
+      setSettings(prev => ({ ...prev, activeProgram: null }))
+    }
+  }
+
+  const duplicateProgram = (p) => {
+    const { id, ...rest } = p
+    setEditingProgram({ ...rest, name: `${p.name} (copy)`, custom: true })
+    setBuilding(true)
+  }
+
   const allPrograms = [...PROGRAMS, ...customPrograms]
+
+  if (building || editingProgram) {
+    return (
+      <ProgramBuilder
+        uid={uid}
+        initial={editingProgram}
+        onSave={handleProgramSaved}
+        onCancel={() => { setBuilding(false); setEditingProgram(null) }}
+      />
+    )
+  }
 
   // ── Active program dashboard ──
   if (activeProgram && activeProgramDef) {
-    const weekNum = computeWeekNumber(activeProgram)
+    const weekNum = computeWeekNumber(activeProgram, activeProgramDef)
     const totalWeeks = activeProgramDef.durationWeeks
     const todayWorkoutKey = getTodayWorkout(activeProgramDef, activeProgram)
-    const todayWorkout = todayWorkoutKey !== 'rest'
+    const todayWorkout = todayWorkoutKey && todayWorkoutKey !== 'rest'
       ? (activeProgramDef.workouts?.[todayWorkoutKey] || null)
       : null
     const pct = Math.round((weekNum / totalWeeks) * 100)
-
-    // Week dot indicators (Mon–Sun)
+    const todayStr = format(new Date(), 'yyyy-MM-dd')
+    const todayDone = !!(activeProgram.completedSessions || {})[todayStr]
+    const schedMode = activeProgram.scheduleMode || 'fixed'
     const weekStart = format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+    const completedDays = new Set(Object.keys(activeProgram.completedSessions || {}).filter(d => d >= weekStart))
     const liftDays = new Set(lifts.filter(l => l.date >= weekStart).map(l => l.date))
     const dayNames = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 
@@ -1008,12 +1543,14 @@ function ProgramsTab({ uid }) {
               <div className="text-lg font-bold text-text">{activeProgramDef.name}</div>
               <div className="text-sm text-muted">Week {weekNum} of {totalWeeks}</div>
             </div>
-            <span className={`text-xs px-2 py-0.5 rounded-full ${
-              activeProgramDef.difficulty === 'beginner' ? 'chip-ok' : 'bg-warn/20 text-warn'
-            }`}>{activeProgramDef.difficulty}</span>
+            <div className="flex flex-col items-end gap-1">
+              <span className={`text-xs px-2 py-0.5 rounded-full ${
+                activeProgramDef.difficulty === 'beginner' ? 'chip-ok' : 'bg-warn/20 text-warn'
+              }`}>{activeProgramDef.difficulty}</span>
+              {activeProgramDef.custom && <span className="text-accent text-xs">Custom</span>}
+            </div>
           </div>
-          {/* Progress bar */}
-          <div className="mb-2">
+          <div className="mb-3">
             <div className="flex justify-between text-xs text-muted mb-1">
               <span>Progress</span><span>{pct}%</span>
             </div>
@@ -1021,66 +1558,79 @@ function ProgramsTab({ uid }) {
               <div className="bg-accent h-2 rounded-full transition-all" style={{ width: `${pct}%` }}/>
             </div>
           </div>
+          <button onClick={toggleScheduleMode} className="btn-secondary text-xs flex items-center gap-1">
+            <Settings2 size={12}/> Mode: {schedMode === 'fixed' ? 'Fixed days' : 'Sequential'}
+          </button>
         </div>
 
-        {/* Today's workout panel */}
+        {/* Today */}
         <div className="card">
           <div className="card-title flex items-center gap-2">
             <Dumbbell size={16} className="text-accent"/>
             Today
+            {todayDone && <span className="chip-ok ml-auto text-xs">Done</span>}
           </div>
           {todayWorkoutKey === 'rest' ? (
             <div className="text-center py-4">
-              <div className="text-2xl mb-2">😴</div>
+              <div className="text-2xl mb-2">&#128564;</div>
               <div className="text-base font-semibold text-text">Rest Day</div>
               <p className="text-xs text-muted mt-1">Recovery is progress. Eat well, sleep well.</p>
             </div>
           ) : todayWorkout?.type === 'cardio' ? (
-            <div>
+            <div className="mb-3">
               <div className="text-base font-semibold text-text mb-1">{todayWorkout.name}</div>
-              <p className="text-sm text-muted mb-3">{todayWorkout.description}</p>
+              <p className="text-sm text-muted mb-2">{todayWorkout.description}</p>
               <div className="text-xs text-muted">Target: {todayWorkout.durationMin} min</div>
             </div>
           ) : todayWorkout?.type === 'mobility' ? (
-            <div>
+            <div className="mb-3">
               <div className="text-base font-semibold text-text mb-1">{todayWorkout.name}</div>
               <p className="text-sm text-muted">{todayWorkout.description}</p>
             </div>
           ) : todayWorkout ? (
-            <div>
+            <div className="mb-3">
               <div className="text-base font-semibold text-text mb-2">{todayWorkout.name}</div>
-              <div className="space-y-1 mb-3">
+              <div className="space-y-1">
                 {(todayWorkout.exercises || []).map((ex, i) => (
                   <div key={i} className="flex items-center gap-2 text-sm">
                     <Dumbbell size={12} className="text-accent shrink-0"/>
                     <span className="text-text">{ex.name}</span>
-                    <span className="text-muted text-xs">
-                      {ex.sets}&times;{ex.reps}
-                      {ex.notes ? ` — ${ex.notes}` : ''}
-                    </span>
+                    <span className="text-muted text-xs">{ex.sets}&times;{ex.reps}{ex.notes ? ` — ${ex.notes}` : ''}</span>
                   </div>
                 ))}
               </div>
             </div>
           ) : (
-            <p className="text-sm text-muted">No workout scheduled today.</p>
+            <p className="text-sm text-muted mb-3">No workout scheduled today.</p>
+          )}
+          {todayWorkoutKey !== 'rest' && (
+            <button
+              onClick={markSessionDone}
+              disabled={todayDone}
+              className={todayDone ? 'btn-secondary text-xs flex items-center gap-1 opacity-60' : 'btn-primary text-xs flex items-center gap-1'}
+            >
+              <CheckCircle size={13}/> {todayDone ? 'Session marked done' : 'Mark session done'}
+            </button>
           )}
         </div>
 
         {/* This week */}
         <div className="card">
           <div className="card-title">This Week</div>
-          <div className="flex gap-2 items-center">
+          <div className="flex gap-1.5 items-end flex-wrap">
             {dayNames.map((d, i) => {
               const date = format(new Date(new Date().setDate(new Date().getDate() - ((new Date().getDay() + 6) % 7) + i)), 'yyyy-MM-dd')
-              const done = liftDays.has(date)
-              const isToday = date === format(new Date(), 'yyyy-MM-dd')
+              const done = completedDays.has(date) || liftDays.has(date)
+              const isToday = date === todayStr
+              const scheduledKey = activeProgramDef.weeklySchedule?.[i]
+              const isRest = !scheduledKey || scheduledKey === 'rest'
               return (
-                <div key={i} className="flex flex-col items-center gap-1">
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold
-                    ${done ? 'bg-success text-bg' : isToday ? 'border-2 border-accent text-accent' : 'bg-surfaceAlt text-muted'}`}>
+                <div key={i} className="flex flex-col items-center gap-0.5">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold
+                    ${done ? 'bg-success text-bg' : isToday ? 'border-2 border-accent text-accent' : isRest ? 'bg-surfaceAlt/40 text-muted/40' : 'bg-surfaceAlt text-muted'}`}>
                     {d}
                   </div>
+                  {!isRest && <div className="text-xs text-muted/60 truncate max-w-[32px] text-center">{scheduledKey?.slice(0, 4)}</div>}
                 </div>
               )
             })}
@@ -1096,23 +1646,20 @@ function ProgramsTab({ uid }) {
             {activeProgramDef.milestones.map(m => {
               const { hit, progress, currentKg, targetKg } = computeMilestoneProgress(m, lifts, weights)
               return (
-                <MilestoneRow
-                  key={m.id}
-                  milestone={m}
-                  progress={progress}
-                  hit={hit}
-                  currentKg={currentKg}
-                  targetKg={targetKg}
-                />
+                <MilestoneRow key={m.id} milestone={m} progress={progress} hit={hit} currentKg={currentKg} targetKg={targetKg}/>
               )
             })}
           </div>
         )}
 
-        {/* Controls */}
         <div className="flex gap-2 flex-wrap">
+          {activeProgramDef.custom && (
+            <button onClick={() => { setEditingProgram(activeProgramDef); setBuilding(true) }} className="btn-secondary text-xs flex items-center gap-1">
+              <Pencil size={12}/> Edit program
+            </button>
+          )}
           <button onClick={exitProgram} className="btn-danger text-xs" disabled={saving}>
-            {saving ? 'Saving…' : 'Exit program'}
+            {saving ? 'Saving...' : 'Exit program'}
           </button>
         </div>
       </div>
@@ -1121,13 +1668,17 @@ function ProgramsTab({ uid }) {
 
   // ── Program detail view ──
   if (viewProgram) {
+    const isCustom = !!viewProgram.custom
     return (
       <div className="space-y-4">
         <button onClick={() => setViewProgram(null)} className="btn-ghost text-xs flex items-center gap-1">
           <ChevronDown size={14} className="rotate-90"/> Back to programs
         </button>
         <div className="card">
-          <div className="text-xl font-bold text-text mb-1">{viewProgram.name}</div>
+          <div className="flex items-start justify-between mb-1">
+            <div className="text-xl font-bold text-text">{viewProgram.name}</div>
+            {isCustom && <span className="text-accent text-xs">Custom</span>}
+          </div>
           <div className="flex gap-2 flex-wrap mb-3">
             <span className="chip-ok">{viewProgram.difficulty}</span>
             <span className="text-xs text-muted">{viewProgram.durationWeeks} weeks · {viewProgram.daysPerWeek} days/wk</span>
@@ -1141,13 +1692,31 @@ function ProgramsTab({ uid }) {
             </div>
           )}
 
-          {/* Workouts */}
+          {viewProgram.weeklySchedule?.length === 7 && (
+            <div className="mb-4">
+              <div className="text-sm font-semibold text-text mb-2">Weekly Schedule</div>
+              <div className="grid grid-cols-7 gap-1">
+                {DAY_LABELS.map((day, i) => {
+                  const slot = viewProgram.weeklySchedule[i]
+                  return (
+                    <div key={i} className="flex flex-col items-center gap-0.5">
+                      <div className="text-xs text-muted">{day}</div>
+                      <div className={`text-xs px-1 py-0.5 rounded text-center w-full ${slot === 'rest' ? 'text-muted/40' : 'bg-accent/20 text-accent'}`}>
+                        {slot === 'rest' ? '-' : slot.slice(0, 4)}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           {viewProgram.workouts && (
             <div className="mb-4">
               <div className="text-sm font-semibold text-text mb-2">Workouts</div>
               {Object.entries(viewProgram.workouts).map(([key, w]) => (
                 <div key={key} className="bg-surfaceAlt rounded-xl p-3 mb-2">
-                  <div className="text-sm font-medium text-text mb-1">{w.name}</div>
+                  <div className="text-sm font-medium text-text mb-1">{w.name || key}</div>
                   {w.exercises?.map((ex, i) => (
                     <div key={i} className="text-xs text-muted flex gap-2 py-0.5">
                       <Dumbbell size={11} className="text-accent shrink-0 mt-0.5"/>
@@ -1155,12 +1724,14 @@ function ProgramsTab({ uid }) {
                     </div>
                   ))}
                   {w.description && <p className="text-xs text-muted mt-1 italic">{w.description}</p>}
+                  {(w.type === 'cardio' || w.type === 'mobility') && w.durationMin > 0 && (
+                    <p className="text-xs text-muted mt-1">Target: {w.durationMin} min</p>
+                  )}
                 </div>
               ))}
             </div>
           )}
 
-          {/* Milestones */}
           {viewProgram.milestones?.length > 0 && (
             <div className="mb-4">
               <div className="text-sm font-semibold text-text mb-2">Milestones</div>
@@ -1173,19 +1744,13 @@ function ProgramsTab({ uid }) {
             </div>
           )}
 
-          {/* Start form */}
           <div className="flex gap-3 items-end flex-wrap mt-4">
             <div>
               <label className="label text-xs">Start date</label>
-              <input type="date" className="input" value={startDate}
-                onChange={e => setStartDate(e.target.value)}/>
+              <input type="date" className="input" value={startDate} onChange={e => setStartDate(e.target.value)}/>
             </div>
-            <button
-              onClick={() => startProgram(viewProgram, startDate)}
-              className="btn-primary flex items-center gap-1"
-              disabled={saving}
-            >
-              <Play size={14}/> {saving ? 'Starting…' : 'Start program'}
+            <button onClick={() => startProgram(viewProgram, startDate)} className="btn-primary flex items-center gap-1" disabled={saving}>
+              <Play size={14}/> {saving ? 'Starting...' : 'Start program'}
             </button>
           </div>
         </div>
@@ -1197,22 +1762,36 @@ function ProgramsTab({ uid }) {
   return (
     <div className="space-y-4">
       <div className="card">
-        <div className="card-title flex items-center gap-2">
-          <Zap size={16} className="text-accent"/> Workout Programs
+        <div className="flex items-center justify-between mb-1">
+          <div className="card-title flex items-center gap-2">
+            <Zap size={16} className="text-accent"/> Workout Programs
+          </div>
+          <button onClick={() => { setEditingProgram(null); setBuilding(true) }} className="btn-primary text-xs flex items-center gap-1">
+            <Plus size={12}/> New program
+          </button>
         </div>
-        <p className="text-sm text-muted">Choose a program to follow. You can only have one active program at a time.</p>
+        <p className="text-sm text-muted">Choose a program to follow. You can only run one at a time.</p>
       </div>
       {allPrograms.map(p => (
-        <ProgramCard
-          key={p.id}
-          program={p}
-          onView={setViewProgram}
-          onStart={(prog) => startProgram(prog, format(new Date(), 'yyyy-MM-dd'))}
-        />
+        <div key={p.id}>
+          <ProgramCard program={p} onView={setViewProgram} onStart={(prog) => startProgram(prog, format(new Date(), 'yyyy-MM-dd'))}/>
+          <div className="flex gap-2 mt-1 px-1">
+            {p.custom && (
+              <>
+                <button onClick={() => { setEditingProgram(p); setBuilding(true) }} className="btn-ghost text-xs flex items-center gap-1"><Pencil size={11}/> Edit</button>
+                <button onClick={() => handleDeleteProgram(p)} className="btn-ghost text-xs text-danger flex items-center gap-1"><Trash2 size={11}/> Delete</button>
+              </>
+            )}
+            <button onClick={() => duplicateProgram(p)} className="btn-ghost text-xs flex items-center gap-1">
+              <Copy size={11}/> {p.custom ? 'Duplicate' : 'Fork & customise'}
+            </button>
+          </div>
+        </div>
       ))}
     </div>
   )
 }
+
 
 // ── History ────────────────────────────────────────────────────────────────────
 function HistoryTab({ uid, onEditLift }) {

@@ -216,31 +216,67 @@ export const PROGRAMS = [
 ]
 
 /**
- * Get a program by id.
+ * Get a program by id from the built-in list only.
+ * For resolution that includes custom programs, use resolveProgram() or useProgramDef().
  */
 export function getProgramById(id) {
   return PROGRAMS.find(p => p.id === id) || null
 }
 
 /**
- * Given an activeProgram object from settings, compute the current week number (1-indexed).
+ * Resolve a program from built-ins OR a list of custom programs.
+ * customPrograms: array of custom program docs from Firestore.
  */
-export function computeWeekNumber(activeProgram) {
+export function resolveProgram(id, customPrograms = []) {
+  return PROGRAMS.find(p => p.id === id) || customPrograms.find(p => p.id === id) || null
+}
+
+/**
+ * Given an activeProgram object from settings, compute the current week number (1-indexed).
+ * Uses durationWeeks from the program definition if provided.
+ */
+export function computeWeekNumber(activeProgram, programDef = null) {
   if (!activeProgram?.startDate) return 1
   const start = new Date(activeProgram.startDate)
   const now = new Date()
   const diffDays = Math.floor((now - start) / (1000 * 60 * 60 * 24))
-  return Math.min(Math.floor(diffDays / 7) + 1, 12)
+  const maxWeek = programDef?.durationWeeks || 52
+  return Math.min(Math.floor(diffDays / 7) + 1, maxWeek)
 }
 
 /**
  * Get today's scheduled workout key from program's weekly schedule.
- * Returns the workout key (e.g. 'A', 'Push', 'LiftA') or 'rest'/'cardio'/'mobility'.
+ * scheduleMode: 'fixed' (default) = day-of-week based
+ *               'sequential' = next slot after last completed, cycling through slots
+ *
+ * Returns the workout key (e.g. 'A', 'Push', 'LiftA') or 'rest'.
  */
 export function getTodayWorkout(program, activeProgram) {
   if (!program || !activeProgram?.startDate) return null
+  const schedule = program.weeklySchedule || []
+  if (!schedule.length) return 'rest'
+
+  const mode = activeProgram.scheduleMode || 'fixed'
+
+  if (mode === 'sequential') {
+    // Count total sessions completed
+    const completedCount = Object.keys(activeProgram.completedSessions || {}).length
+    // Find the next non-rest slot
+    const nonRestSlots = schedule.filter(s => s !== 'rest')
+    if (!nonRestSlots.length) return 'rest'
+    // Check if today is already marked done
+    const todayStr = new Date().toISOString().slice(0, 10)
+    const todayDone = !!(activeProgram.completedSessions || {})[todayStr]
+    if (todayDone) {
+      // Already done today — show what was done
+      return (activeProgram.completedSessions || {})[todayStr] || 'rest'
+    }
+    const idx = completedCount % nonRestSlots.length
+    return nonRestSlots[idx]
+  }
+
+  // Default: fixed day-of-week
   const dayOfWeek = new Date().getDay() // 0=Sun
-  // Convert to Mon-based index
   const monIdx = (dayOfWeek + 6) % 7
-  return program.weeklySchedule?.[monIdx] || 'rest'
+  return schedule[monIdx] || 'rest'
 }

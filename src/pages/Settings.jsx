@@ -5,8 +5,7 @@ import { getSettings, saveSettings, getAll, addEntry, deleteEntry, setEntry } fr
 import { Download, LogOut, Save, CloudUpload, Bell, BellOff, Database, Award, X, Plus, Trash2, Pencil, Dumbbell, Activity, Zap } from 'lucide-react'
 import { requestNotificationPermission } from '../lib/messaging.js'
 import { backupToDrive } from '../lib/drive.js'
-import { getProgramById } from '../training/programs.js'
-import { computeWeekNumber } from '../training/programs.js'
+import { resolveProgram, computeWeekNumber } from '../training/programs.js'
 
 const SEED_MEALS = [
   { name: 'Porridge with banana', kcal: 380, protein: 14, carbs: 60, fat: 8 },
@@ -425,16 +424,18 @@ export default function Settings() {
 // ── Active Program Section ─────────────────────────────────────────────────────
 function ActiveProgramSection({ uid, navigate }) {
   const [settings, setSettings] = useState(null)
+  const [customPrograms, setCustomPrograms] = useState([])
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     getSettings(uid).then(setSettings)
+    getAll(uid, 'customPrograms').then(setCustomPrograms)
   }, [uid])
 
   if (!settings) return null
 
   const activeProgram = settings.activeProgram
-  const programDef = activeProgram ? getProgramById(activeProgram.id) : null
+  const programDef = activeProgram ? resolveProgram(activeProgram.id, customPrograms) : null
 
   const exitProgram = async () => {
     if (!confirm('Exit current program?')) return
@@ -458,7 +459,7 @@ function ActiveProgramSection({ uid, navigate }) {
     </Section>
   )
 
-  const weekNum = computeWeekNumber(activeProgram)
+  const weekNum = computeWeekNumber(activeProgram, programDef)
   const totalWeeks = programDef.durationWeeks
   const pct = Math.round((weekNum / totalWeeks) * 100)
 

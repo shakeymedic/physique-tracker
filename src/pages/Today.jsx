@@ -9,7 +9,7 @@ import { isMedDueToday, lastTakenDate } from '../clinical/meds.js'
 import { computeMuscleRecovery, muscleStatus } from '../training/exercises.js'
 import WeightChart, { computeWeeklyRate } from '../components/WeightChart.jsx'
 import MoodPicker from '../components/MoodPicker.jsx'
-import { getProgramById, getTodayWorkout } from '../training/programs.js'
+import { resolveProgram, getTodayWorkout } from '../training/programs.js'
 
 const today = () => format(new Date(), 'yyyy-MM-dd')
 
@@ -502,7 +502,13 @@ export default function Today() {
 
 // ── Today’s program plan panel ─────────────────────────────────────────────────
 function TodayProgramPanel({ activeProgram, navigate }) {
-  const programDef = getProgramById(activeProgram.id)
+  const { user } = useAuth()
+  const [customPrograms, setCustomPrograms] = useState([])
+  useEffect(() => {
+    if (user?.uid) getAll(user.uid, 'customPrograms').then(setCustomPrograms)
+  }, [user?.uid])
+
+  const programDef = resolveProgram(activeProgram.id, customPrograms)
   if (!programDef) return null
 
   const todayWorkoutKey = getTodayWorkout(programDef, activeProgram)
