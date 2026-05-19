@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../auth.jsx'
-import { subscribe, addEntry, deleteEntry } from '../data.js'
+import { subscribe, addEntry, deleteEntry, setEntry } from '../data.js'
 import { format } from 'date-fns'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
 } from 'recharts'
 import { Trash2 } from 'lucide-react'
+import EditableRow from '../components/EditableRow.jsx'
 
 const today = () => format(new Date(), 'yyyy-MM-dd')
 
@@ -27,6 +28,7 @@ function WeightSection({ uid }) {
   const [entries, setEntries] = useState([])
   const [form, setForm] = useState({ date: today(), weight: '', bodyFat: '', notes: '' })
   const [saving, setSaving] = useState(false)
+  const [editId, setEditId] = useState(null)
 
   useEffect(() => subscribe(uid, 'weights', setEntries, { limit: 180 }), [uid])
 
@@ -35,15 +37,27 @@ function WeightSection({ uid }) {
     if (!form.weight) return
     setSaving(true)
     try {
-      await addEntry(uid, 'weights', {
+      const data = {
         date: form.date,
         weight: parseFloat(form.weight),
         bodyFat: form.bodyFat ? parseFloat(form.bodyFat) : null,
         notes: form.notes,
-      })
+      }
+      if (editId) {
+        await setEntry(uid, 'weights', editId, data)
+        setEditId(null)
+      } else {
+        await addEntry(uid, 'weights', data)
+      }
       setForm({ date: today(), weight: '', bodyFat: '', notes: '' })
     } finally { setSaving(false) }
   }
+
+  const startEdit = (entry) => {
+    setForm({ date: entry.date, weight: String(entry.weight || ''), bodyFat: String(entry.bodyFat || ''), notes: entry.notes || '' })
+    setEditId(entry.id)
+  }
+  const cancelEdit = () => { setEditId(null); setForm({ date: today(), weight: '', bodyFat: '', notes: '' }) }
 
   const sorted = entries.slice().sort((a, b) => a.date.localeCompare(b.date))
   const chartData = sorted.slice(-90).map(w => ({
@@ -77,8 +91,9 @@ function WeightSection({ uid }) {
             <input type="text" className="input" placeholder="e.g. morning fasted"
               value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}/>
           </div>
-          <div className="md:col-span-2">
-            <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save Entry'}</button>
+          <div className="md:col-span-2 flex gap-2">
+            <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Saving…' : editId ? 'Update Entry' : 'Save Entry'}</button>
+            {editId && <button type="button" onClick={cancelEdit} className="btn-secondary">Cancel</button>}
           </div>
         </form>
       </div>
@@ -108,14 +123,16 @@ function WeightSection({ uid }) {
         ) : (
           <div className="space-y-2">
             {entries.map(e => (
-              <div key={e.id} className="flex items-center justify-between bg-bg rounded-lg px-3 py-2">
-                <span className="text-sm text-muted">{e.date}</span>
-                <span className="text-sm font-medium text-text">{e.weight} kg{e.bodyFat ? ` · ${e.bodyFat}% BF` : ''}</span>
-                {e.notes && <span className="text-xs text-muted hidden md:block">{e.notes}</span>}
-                <button onClick={() => deleteEntry(uid, 'weights', e.id)} className="btn-ghost p-1" title="Delete">
-                  <Trash2 size={14}/>
-                </button>
-              </div>
+              <EditableRow key={e.id}
+                onEdit={() => startEdit(e)}
+                onDelete={() => deleteEntry(uid, 'weights', e.id)}
+              >
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-sm text-muted">{e.date}</span>
+                  <span className="text-sm font-medium text-text">{e.weight} kg{e.bodyFat ? ` · ${e.bodyFat}% BF` : ''}</span>
+                  {e.notes && <span className="text-xs text-muted hidden md:block">{e.notes}</span>}
+                </div>
+              </EditableRow>
             ))}
           </div>
         )}
@@ -131,8 +148,10 @@ const MEAS_LABELS = { waist:'Waist', chest:'Chest', armsL:'Arms L', armsR:'Arms 
 
 function MeasurementsSection({ uid }) {
   const [entries, setEntries] = useState([])
-  const [form, setForm] = useState({ date: today(), ...Object.fromEntries(MEAS_FIELDS.map(f => [f, ''])) })
+  const emptyForm = () => ({ date: today(), ...Object.fromEntries(MEAS_FIELDS.map(f => [f, ''])) })
+  const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
+  const [editId, setEditId] = useState(null)
 
   useEffect(() => subscribe(uid, 'measurements', setEntries, { limit: 100 }), [uid])
 
@@ -142,10 +161,21 @@ function MeasurementsSection({ uid }) {
     MEAS_FIELDS.forEach(f => { if (form[f]) data[f] = parseFloat(form[f]) })
     setSaving(true)
     try {
-      await addEntry(uid, 'measurements', data)
-      setForm({ date: today(), ...Object.fromEntries(MEAS_FIELDS.map(f => [f, ''])) })
+      if (editId) {
+        await setEntry(uid, 'measurements', editId, data)
+        setEditId(null)
+      } else {
+        await addEntry(uid, 'measurements', data)
+      }
+      setForm(emptyForm())
     } finally { setSaving(false) }
   }
+
+  const startEdit = (entry) => {
+    setForm({ date: entry.date, ...Object.fromEntries(MEAS_FIELDS.map(f => [f, entry[f] ? String(entry[f]) : ''])) })
+    setEditId(entry.id)
+  }
+  const cancelEdit = () => { setEditId(null); setForm(emptyForm()) }
 
   const sorted = entries.slice().sort((a, b) => a.date.localeCompare(b.date))
   const chartData = sorted.slice(-60).map(m => ({
@@ -172,8 +202,9 @@ function MeasurementsSection({ uid }) {
                 value={form[f]} onChange={e => setForm(p => ({ ...p, [f]: e.target.value }))}/>
             </div>
           ))}
-          <div className="col-span-2 md:col-span-4">
-            <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save Measurements'}</button>
+          <div className="col-span-2 md:col-span-4 flex gap-2">
+            <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Saving…' : editId ? 'Update' : 'Save Measurements'}</button>
+            {editId && <button type="button" onClick={cancelEdit} className="btn-secondary">Cancel</button>}
           </div>
         </form>
       </div>
@@ -205,17 +236,19 @@ function MeasurementsSection({ uid }) {
         ) : (
           <div className="space-y-2">
             {entries.map(e => (
-              <div key={e.id} className="flex items-start justify-between bg-bg rounded-lg px-3 py-2 gap-2">
-                <span className="text-sm text-muted shrink-0">{e.date}</span>
-                <div className="flex flex-wrap gap-2 text-xs text-muted">
-                  {MEAS_FIELDS.filter(f => e[f]).map(f => (
-                    <span key={f}>{MEAS_LABELS[f]}: <span className="text-text">{e[f]}cm</span></span>
-                  ))}
+              <EditableRow key={e.id}
+                onEdit={() => startEdit(e)}
+                onDelete={() => deleteEntry(uid, 'measurements', e.id)}
+              >
+                <div>
+                  <div className="text-sm text-muted">{e.date}</div>
+                  <div className="flex flex-wrap gap-2 text-xs text-muted">
+                    {MEAS_FIELDS.filter(f => e[f]).map(f => (
+                      <span key={f}>{MEAS_LABELS[f]}: <span className="text-text">{e[f]}cm</span></span>
+                    ))}
+                  </div>
                 </div>
-                <button onClick={() => deleteEntry(uid, 'measurements', e.id)} className="btn-ghost p-1 shrink-0">
-                  <Trash2 size={14}/>
-                </button>
-              </div>
+              </EditableRow>
             ))}
           </div>
         )}

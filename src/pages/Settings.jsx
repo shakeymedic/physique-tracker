@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
 import { getSettings, saveSettings, getAll, addEntry } from '../data.js'
-import { Download, LogOut, Save, CloudUpload, Bell, BellOff, Database } from 'lucide-react'
+import { Download, LogOut, Save, CloudUpload, Bell, BellOff, Database, Award, X, Plus } from 'lucide-react'
 import { requestNotificationPermission } from '../lib/messaging.js'
 import { backupToDrive } from '../lib/drive.js'
 
@@ -20,6 +21,11 @@ const SEED_MEALS = [
   { name: 'Chicken Caesar salad', kcal: 420, protein: 38, carbs: 12, fat: 24 },
 ]
 
+const DEFAULT_SELF_CARE_CATEGORIES = [
+  'skincare', 'walk', 'meditation', 'stretching', 'bath/shower', 'journalling',
+  'reading', 'early bed', 'no alcohol', 'social time',
+]
+
 function Section({ title, children }) {
   return (
     <div className="card">
@@ -32,6 +38,7 @@ function Section({ title, children }) {
 export default function Settings() {
   const { user, signOutUser } = useAuth()
   const uid = user?.uid
+  const navigate = useNavigate()
 
   const [form, setForm] = useState({
     sex: 'M',
@@ -43,6 +50,12 @@ export default function Settings() {
     spoonacularKey: '',
     geminiApiKey: '',
     lastDriveBackup: '',
+    // Activity goals
+    gymPerWeek: '3',
+    cardioPerWeek: '2',
+    cardioMinutesPerWeek: '90',
+    stepsPerDay: '8000',
+    selfCarePerWeek: '5',
   })
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -55,9 +68,14 @@ export default function Settings() {
   const [driveBacking, setDriveBacking] = useState(false)
   const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY
 
+  // Self-care categories
+  const [selfCareCategories, setSelfCareCategories] = useState(DEFAULT_SELF_CARE_CATEGORIES)
+  const [newCategory, setNewCategory] = useState('')
+
   useEffect(() => {
     if (!uid) return
     getSettings(uid).then(s => {
+      const ag = s.activityGoals || {}
       setForm({
         sex: s.sex || 'M',
         height: s.height || '',
@@ -68,7 +86,15 @@ export default function Settings() {
         spoonacularKey: s.spoonacularKey || '',
         geminiApiKey: s.geminiApiKey || '',
         lastDriveBackup: s.lastDriveBackup || '',
+        gymPerWeek: ag.gymPerWeek != null ? String(ag.gymPerWeek) : '3',
+        cardioPerWeek: ag.cardioPerWeek != null ? String(ag.cardioPerWeek) : '2',
+        cardioMinutesPerWeek: ag.cardioMinutesPerWeek != null ? String(ag.cardioMinutesPerWeek) : '90',
+        stepsPerDay: ag.stepsPerDay != null ? String(ag.stepsPerDay) : '8000',
+        selfCarePerWeek: ag.selfCarePerWeek != null ? String(ag.selfCarePerWeek) : '5',
       })
+      if (s.selfCareCategories && Array.isArray(s.selfCareCategories) && s.selfCareCategories.length > 0) {
+        setSelfCareCategories(s.selfCareCategories)
+      }
     })
   }, [uid])
 
@@ -87,10 +113,29 @@ export default function Settings() {
         },
         spoonacularKey: form.spoonacularKey || null,
         geminiApiKey: form.geminiApiKey || null,
+        activityGoals: {
+          gymPerWeek: form.gymPerWeek ? parseInt(form.gymPerWeek) : 3,
+          cardioPerWeek: form.cardioPerWeek ? parseInt(form.cardioPerWeek) : 2,
+          cardioMinutesPerWeek: form.cardioMinutesPerWeek ? parseInt(form.cardioMinutesPerWeek) : 90,
+          stepsPerDay: form.stepsPerDay ? parseInt(form.stepsPerDay) : 8000,
+          selfCarePerWeek: form.selfCarePerWeek ? parseInt(form.selfCarePerWeek) : 5,
+        },
+        selfCareCategories,
       })
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
     } finally { setSaving(false) }
+  }
+
+  const addCategory = () => {
+    const cat = newCategory.trim().toLowerCase()
+    if (!cat || selfCareCategories.includes(cat)) return
+    setSelfCareCategories(prev => [...prev, cat])
+    setNewCategory('')
+  }
+
+  const removeCategory = (cat) => {
+    setSelfCareCategories(prev => prev.filter(c => c !== cat))
   }
 
   const seedMeals = async () => {
@@ -123,7 +168,7 @@ export default function Settings() {
   const doBackupToDrive = async () => {
     setDriveBacking(true); setDriveMsg('')
     try {
-      const COLLECTIONS = ['weights','measurements','lifts','nutritionLog','bloods','medications','medicationLog','planner','mealTemplates','workoutTemplates']
+      const COLLECTIONS = ['weights', 'measurements', 'lifts', 'cardio', 'nutritionLog', 'bloods', 'medications', 'medicationLog', 'planner', 'mealTemplates', 'workoutTemplates', 'wellbeing', 'selfCareLog']
       const allData = {}
       for (const col of COLLECTIONS) { allData[col] = await getAll(uid, col) }
       await backupToDrive(allData)
@@ -136,7 +181,7 @@ export default function Settings() {
   }
 
   const exportAll = async () => {
-    const COLLECTIONS = ['weights','measurements','lifts','nutritionLog','bloods','medications','medicationLog','planner','mealTemplates','workoutTemplates','photos']
+    const COLLECTIONS = ['weights', 'measurements', 'lifts', 'cardio', 'nutritionLog', 'bloods', 'medications', 'medicationLog', 'planner', 'mealTemplates', 'workoutTemplates', 'photos', 'wellbeing', 'selfCareLog']
     setExporting(true)
     try {
       for (const col of COLLECTIONS) {
@@ -154,10 +199,10 @@ export default function Settings() {
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = `physique-tracker-${col}-${new Date().toISOString().slice(0,10)}.csv`
+        a.download = `physique-tracker-${col}-${new Date().toISOString().slice(0, 10)}.csv`
         a.click()
         URL.revokeObjectURL(url)
-        await new Promise(r => setTimeout(r, 200)) // small delay between downloads
+        await new Promise(r => setTimeout(r, 200))
       }
     } finally { setExporting(false) }
   }
@@ -177,8 +222,27 @@ export default function Settings() {
             <div>
               <label className="label">Height (cm)</label>
               <input type="number" min="100" max="250" step="0.1" className="input"
-                value={form.height} onChange={e => setForm(p => ({ ...p, height: e.target.value }))}/>
+                value={form.height} onChange={e => setForm(p => ({ ...p, height: e.target.value }))} />
             </div>
+          </div>
+        </Section>
+
+        <Section title="Activity Goals">
+          <p className="text-xs text-muted mb-3">Used in Today, Insights and Achievements to track weekly progress.</p>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {[
+              { key: 'gymPerWeek', label: 'Gym sessions / week' },
+              { key: 'cardioPerWeek', label: 'Cardio sessions / week' },
+              { key: 'cardioMinutesPerWeek', label: 'Cardio minutes / week' },
+              { key: 'stepsPerDay', label: 'Steps / day' },
+              { key: 'selfCarePerWeek', label: 'Self-care sessions / week' },
+            ].map(({ key, label }) => (
+              <div key={key}>
+                <label className="label">{label}</label>
+                <input type="number" min="0" step="1" className="input"
+                  value={form[key]} onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))} />
+              </div>
+            ))}
           </div>
         </Section>
 
@@ -194,7 +258,7 @@ export default function Settings() {
               <div key={key}>
                 <label className="label">{label}</label>
                 <input type="number" min="0" className="input"
-                  value={form[key]} onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))}/>
+                  value={form[key]} onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))} />
               </div>
             ))}
           </div>
@@ -206,12 +270,12 @@ export default function Settings() {
             <div>
               <label className="label">Spoonacular API Key</label>
               <input type="password" className="input" placeholder="Enter key to enable meal planner"
-                value={form.spoonacularKey} onChange={e => setForm(p => ({ ...p, spoonacularKey: e.target.value }))}/>
+                value={form.spoonacularKey} onChange={e => setForm(p => ({ ...p, spoonacularKey: e.target.value }))} />
             </div>
             <div>
               <label className="label">Gemini API Key</label>
               <input type="password" className="input" placeholder="Enter key to enable AI Coach"
-                value={form.geminiApiKey} onChange={e => setForm(p => ({ ...p, geminiApiKey: e.target.value }))}/>
+                value={form.geminiApiKey} onChange={e => setForm(p => ({ ...p, geminiApiKey: e.target.value }))} />
               <p className="text-xs text-muted mt-1">
                 Get a free key at{' '}
                 <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer"
@@ -222,21 +286,73 @@ export default function Settings() {
         </Section>
 
         <button type="submit" className="btn-primary w-full" disabled={saving}>
-          <Save size={14}/> {saved ? '✓ Saved!' : saving ? 'Saving…' : 'Save Settings'}
+          <Save size={14} /> {saved ? '✓ Saved!' : saving ? 'Saving…' : 'Save Settings'}
         </button>
       </form>
+
+      {/* Self-care categories editor */}
+      <Section title="Self-Care Categories">
+        <p className="text-sm text-muted mb-3">Customise the quick-log chips shown in the Wellbeing → Self-Care tab.</p>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {selfCareCategories.map(cat => (
+            <span key={cat}
+              className="chip-ok flex items-center gap-1 cursor-pointer group">
+              {cat}
+              <button
+                type="button"
+                onClick={() => removeCategory(cat)}
+                className="ml-0.5 opacity-60 group-hover:opacity-100 transition-opacity"
+                aria-label={`Remove ${cat}`}>
+                <X size={10} />
+              </button>
+            </span>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            className="input flex-1"
+            placeholder="Add category…"
+            value={newCategory}
+            onChange={e => setNewCategory(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCategory() } }}
+          />
+          <button type="button" className="btn-secondary" onClick={addCategory} disabled={!newCategory.trim()}>
+            <Plus size={14} /> Add
+          </button>
+        </div>
+        <button
+          type="button"
+          className="btn-ghost text-xs mt-3"
+          onClick={() => setSelfCareCategories(DEFAULT_SELF_CARE_CATEGORIES)}
+        >
+          Reset to defaults
+        </button>
+      </Section>
+
+      {/* Achievements link */}
+      <Section title="Achievements">
+        <p className="text-sm text-muted mb-3">View your earned badges and streaks based on your logged data.</p>
+        <button
+          type="button"
+          onClick={() => navigate('/achievements')}
+          className="btn-secondary flex items-center gap-2"
+        >
+          <Award size={14} /> View Achievements
+        </button>
+      </Section>
 
       <Section title="Data Export">
         <p className="text-sm text-muted mb-3">Download all your data as CSV files (one per collection).</p>
         <button onClick={exportAll} className="btn-secondary" disabled={exporting}>
-          <Download size={14}/> {exporting ? 'Exporting…' : 'Export All Data'}
+          <Download size={14} /> {exporting ? 'Exporting…' : 'Export All Data'}
         </button>
       </Section>
 
       <Section title="UK Meal Templates">
         <p className="text-sm text-muted mb-3">Seed 12 common UK meal templates to your Meals list for quick logging.</p>
         <button onClick={seedMeals} className="btn-secondary" disabled={seeding}>
-          <Database size={14}/> {seeding ? 'Seeding…' : 'Seed UK Meal Templates'}
+          <Database size={14} /> {seeding ? 'Seeding…' : 'Seed UK Meal Templates'}
         </button>
         {seedMsg && <p className="text-xs text-success mt-2">{seedMsg}</p>}
       </Section>
@@ -248,7 +364,7 @@ export default function Settings() {
           <p className="text-xs text-muted mb-2">Last backup: {new Date(form.lastDriveBackup).toLocaleString()}</p>
         )}
         <button onClick={doBackupToDrive} className="btn-secondary" disabled={driveBacking}>
-          <CloudUpload size={14}/> {driveBacking ? 'Backing up…' : 'Back up now'}
+          <CloudUpload size={14} /> {driveBacking ? 'Backing up…' : 'Back up now'}
         </button>
         {driveMsg && <p className="text-xs mt-2" style={{ color: driveMsg.includes('failed') ? '#ef4444' : '#10b981' }}>{driveMsg}</p>}
       </Section>
@@ -260,7 +376,7 @@ export default function Settings() {
         ) : (
           <>
             <button onClick={enablePush} className="btn-secondary" disabled={pushEnabled}>
-              {pushEnabled ? <><Bell size={14}/> Notifications enabled</> : <><BellOff size={14}/> Enable push notifications</>}
+              {pushEnabled ? <><Bell size={14} /> Notifications enabled</> : <><BellOff size={14} /> Enable push notifications</>}
             </button>
             {pushMsg && <p className="text-xs mt-2" style={{ color: pushMsg.includes('denied') || pushMsg.includes('Error') ? '#ef4444' : '#10b981' }}>{pushMsg}</p>}
           </>
@@ -270,7 +386,7 @@ export default function Settings() {
       <Section title="Account">
         <p className="text-sm text-muted mb-3">Signed in as <span className="text-text">{user?.email || user?.displayName}</span></p>
         <button onClick={signOutUser} className="btn-danger">
-          <LogOut size={14}/> Sign Out
+          <LogOut size={14} /> Sign Out
         </button>
       </Section>
     </div>

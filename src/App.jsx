@@ -1,6 +1,6 @@
 import { Routes, Route, NavLink, Navigate } from 'react-router-dom'
 import { LogOut, LayoutDashboard, Dumbbell, Apple, Activity, Pill, Camera, Settings,
-  Ruler, ClipboardList, Sparkles, Sun, Moon, Cloud, CloudOff, Home } from 'lucide-react'
+  Ruler, ClipboardList, Sparkles, Sun, Moon, Cloud, CloudOff, Home, Heart } from 'lucide-react'
 import { useAuth } from './auth.jsx'
 import { isConfigured } from './firebase.js'
 import { useTheme } from './theme.jsx'
@@ -17,6 +17,8 @@ import Photos from './pages/Photos.jsx'
 import Planner from './pages/Planner.jsx'
 import Coach from './pages/Coach.jsx'
 import SettingsPage from './pages/Settings.jsx'
+import Wellbeing from './pages/Wellbeing.jsx'
+import Achievements from './pages/Achievements.jsx'
 import UpdateToast from './components/UpdateToast.jsx'
 
 const tabs = [
@@ -26,6 +28,7 @@ const tabs = [
   { to: '/training', label: 'Training', icon: Dumbbell },
   { to: '/nutrition', label: 'Nutrition', icon: Apple },
   { to: '/bloods', label: 'Bloods', icon: Activity },
+  { to: '/wellbeing', label: 'Wellbeing', icon: Heart },
   { to: '/meds', label: 'Meds', icon: Pill },
   { to: '/photos', label: 'Photos', icon: Camera },
   { to: '/planner', label: 'Planner', icon: ClipboardList },
@@ -100,6 +103,8 @@ export default function App() {
           <Route path="/planner" element={<Planner />} />
           <Route path="/coach" element={<Coach />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/wellbeing" element={<Wellbeing />} />
+          <Route path="/achievements" element={<Achievements />} />
           {/* Legacy redirect */}
           <Route path="/dashboard" element={<Navigate to="/insights" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />

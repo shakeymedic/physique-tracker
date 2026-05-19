@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../auth.jsx'
-import { subscribe, addEntry, deleteEntry, getSettings } from '../data.js'
+import { subscribe, addEntry, deleteEntry, setEntry, getSettings } from '../data.js'
 import { format } from 'date-fns'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine,
 } from 'recharts'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Pencil } from 'lucide-react'
 import { flag, RANGES } from '../clinical/ranges.js'
+import EditableRow from '../components/EditableRow.jsx'
 
 const today = () => format(new Date(), 'yyyy-MM-dd')
 
@@ -63,8 +64,10 @@ const BLOOD_FIELDS = [
 // ── Log ───────────────────────────────────────────────────────────────────────
 function LogTab({ uid, sex }) {
   const [entries, setEntries] = useState([])
-  const [form, setForm] = useState({ date: today(), ...Object.fromEntries(BLOOD_FIELDS.map(f => [f.key, ''])) })
+  const emptyForm = () => ({ date: today(), ...Object.fromEntries(BLOOD_FIELDS.map(f => [f.key, ''])) })
+  const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
+  const [editId, setEditId] = useState(null)
 
   useEffect(() => subscribe(uid, 'bloods', setEntries, { limit: 100 }), [uid])
 
@@ -74,10 +77,24 @@ function LogTab({ uid, sex }) {
     BLOOD_FIELDS.forEach(f => { if (form[f.key] !== '') data[f.key] = parseFloat(form[f.key]) })
     setSaving(true)
     try {
-      await addEntry(uid, 'bloods', data)
-      setForm({ date: today(), ...Object.fromEntries(BLOOD_FIELDS.map(f => [f.key, ''])) })
+      if (editId) {
+        await setEntry(uid, 'bloods', editId, data)
+        setEditId(null)
+      } else {
+        await addEntry(uid, 'bloods', data)
+      }
+      setForm(emptyForm())
     } finally { setSaving(false) }
   }
+
+  const startEdit = (entry) => {
+    setForm({
+      date: entry.date,
+      ...Object.fromEntries(BLOOD_FIELDS.map(f => [f.key, entry[f.key] !== undefined && entry[f.key] !== null ? String(entry[f.key]) : '']))
+    })
+    setEditId(entry.id)
+  }
+  const cancelEdit = () => { setEditId(null); setForm(emptyForm()) }
 
   const groups = [...new Set(BLOOD_FIELDS.map(f => f.group))]
 
@@ -105,7 +122,10 @@ function LogTab({ uid, sex }) {
               </div>
             </div>
           ))}
-          <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save Results'}</button>
+          <div className="flex gap-2">
+            <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Saving…' : editId ? 'Update Results' : 'Save Results'}</button>
+            {editId && <button type="button" onClick={cancelEdit} className="btn-secondary">Cancel</button>}
+          </div>
         </form>
       </div>
 
@@ -114,21 +134,24 @@ function LogTab({ uid, sex }) {
         {entries.length === 0 ? (
           <p className="text-sm text-muted">No blood results logged yet.</p>
         ) : entries.map(e => (
-          <div key={e.id} className="bg-bg rounded-lg p-3 mb-2">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium">{e.date}</span>
-              <button onClick={() => deleteEntry(uid, 'bloods', e.id)} className="btn-ghost p-1 text-danger">✕</button>
+          <EditableRow key={e.id}
+            onEdit={() => startEdit(e)}
+            onDelete={() => deleteEntry(uid, 'bloods', e.id)}
+            className="mb-2 items-start"
+          >
+            <div>
+              <div className="text-sm font-medium mb-1">{e.date}</div>
+              <div className="flex flex-wrap gap-2">
+                {BLOOD_FIELDS.filter(f => e[f.key] !== undefined && e[f.key] !== null).map(f => (
+                  <div key={f.key} className="flex items-center gap-1 text-xs">
+                    <span className="text-muted">{f.label}:</span>
+                    <span className="text-text">{e[f.key]}</span>
+                    <FlagChip name={f.key} value={e[f.key]} sex={sex}/>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {BLOOD_FIELDS.filter(f => e[f.key] !== undefined && e[f.key] !== null).map(f => (
-                <div key={f.key} className="flex items-center gap-1 text-xs">
-                  <span className="text-muted">{f.label}:</span>
-                  <span className="text-text">{e[f.key]}</span>
-                  <FlagChip name={f.key} value={e[f.key]} sex={sex}/>
-                </div>
-              ))}
-            </div>
-          </div>
+          </EditableRow>
         ))}
       </div>
     </div>

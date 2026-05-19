@@ -2,6 +2,8 @@
  * Exercise → muscle group mapping
  * primary: main muscles trained
  * secondary: supporting muscles
+ *
+ * Also includes cardio types with light fatigue mappings.
  */
 export const EXERCISES = [
   { name: 'Bench Press', primary: ['Chest'], secondary: ['Triceps', 'Shoulders'] },
@@ -28,6 +30,28 @@ export const EXERCISES = [
   { name: 'Push-Up', primary: ['Chest'], secondary: ['Triceps', 'Shoulders', 'Core'] },
 ]
 
+/**
+ * Cardio type → muscle recovery effect
+ * recoveryDays: approximate recovery time (used in heatmap)
+ */
+export const CARDIO_TYPES = [
+  'Running', 'Cycling', 'Walking', 'Rowing', 'Swimming',
+  'Elliptical', 'Stair Climber', 'HIIT', 'Spin', 'Other',
+]
+
+export const CARDIO_MUSCLE_MAP = {
+  Running:       { muscles: ['Quads', 'Hamstrings', 'Calves'], recoveryDays: 1 },
+  Cycling:       { muscles: ['Quads', 'Hamstrings', 'Calves'], recoveryDays: 1 },
+  Walking:       { muscles: ['Quads', 'Hamstrings', 'Calves'], recoveryDays: 1 },
+  Rowing:        { muscles: ['Back', 'Biceps', 'Core', 'Quads'], recoveryDays: 2 },
+  Swimming:      { muscles: ['Shoulders', 'Back', 'Core'], recoveryDays: 2 },
+  Elliptical:    { muscles: ['Quads', 'Hamstrings', 'Calves'], recoveryDays: 1 },
+  'Stair Climber': { muscles: ['Quads', 'Glutes', 'Calves'], recoveryDays: 1 },
+  HIIT:          { muscles: ['Quads', 'Hamstrings', 'Calves', 'Chest', 'Core'], recoveryDays: 2 },
+  Spin:          { muscles: ['Quads', 'Hamstrings', 'Calves'], recoveryDays: 1 },
+  Other:         { muscles: [], recoveryDays: 1 },
+}
+
 /** All distinct muscle regions for the heatmap */
 export const MUSCLE_REGIONS = [
   'Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps',
@@ -42,16 +66,36 @@ export const MUSCLE_REGIONS = [
  * @param {string} today - 'YYYY-MM-DD'
  * @returns {object} { [muscle]: daysAgo } — null means never trained
  */
-export function computeMuscleRecovery(lifts, today) {
+export function computeMuscleRecovery(lifts, today, cardioSessions = []) {
   const lastTrained = {}
 
   lifts.forEach(lift => {
-    const ex = EXERCISES.find(e => e.name === lift.exercise)
-    if (!ex || !lift.date) return
-    const muscles = [...ex.primary, ...ex.secondary]
-    muscles.forEach(m => {
-      if (!lastTrained[m] || lift.date > lastTrained[m]) {
-        lastTrained[m] = lift.date
+    // Handle new multi-exercise shape
+    const exercises = lift.exercises
+      ? lift.exercises
+      : lift.exercise
+        ? [{ name: lift.exercise, sets: lift.sets }]
+        : []
+
+    exercises.forEach(exEntry => {
+      const ex = EXERCISES.find(e => e.name === exEntry.name)
+      if (!ex || !lift.date) return
+      const muscles = [...ex.primary, ...ex.secondary]
+      muscles.forEach(m => {
+        if (!lastTrained[m] || lift.date > lastTrained[m]) {
+          lastTrained[m] = lift.date
+        }
+      })
+    })
+  })
+
+  // Factor in cardio sessions
+  cardioSessions.forEach(session => {
+    const mapping = CARDIO_MUSCLE_MAP[session.type]
+    if (!mapping || !session.date) return
+    mapping.muscles.forEach(m => {
+      if (!lastTrained[m] || session.date > lastTrained[m]) {
+        lastTrained[m] = session.date
       }
     })
   })

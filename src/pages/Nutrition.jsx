@@ -1,13 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useAuth } from '../auth.jsx'
 import { subscribe, addEntry, deleteEntry, setEntry, getSettings, saveSettings, getAll } from '../data.js'
 import { format } from 'date-fns'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts'
-import { Trash2, Plus, Scan, Coffee } from 'lucide-react'
+import { Trash2, Plus, Scan, Coffee, Pencil } from 'lucide-react'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 import MicButton from '../components/MicButton.jsx'
+import EditableRow from '../components/EditableRow.jsx'
+import { TodChip, TodSelect, detectTimeOfDay } from '../lib/timeOfDay.jsx'
+import { saveDraft, loadDraft, clearDraft, draftAgo } from '../lib/draft.js'
 
 const today = () => format(new Date(), 'yyyy-MM-dd')
 
@@ -31,14 +34,18 @@ const ACTIVITY = [
 
 // ── Today ─────────────────────────────────────────────────────────────────────
 function TodayTab({ uid }) {
+  const DRAFT_KEY = `pt-draft-nutrition-${uid}`
   const [log, setLog] = useState([])
   const [templates, setTemplates] = useState([])
   const [settings, setSettings] = useState({})
-  const [form, setForm] = useState({ date: today(), name: '', kcal: '', protein: '', carbs: '', fat: '' })
+  const [form, setForm] = useState({ date: today(), timeOfDay: detectTimeOfDay(), name: '', kcal: '', protein: '', carbs: '', fat: '' })
   const [saving, setSaving] = useState(false)
   const [scanOpen, setScanOpen] = useState(false)
   const [dietBreaks, setDietBreaks] = useState({})
   const [dbSaving, setDbSaving] = useState(false)
+  const [editId, setEditId] = useState(null)
+  const [draftPrompt, setDraftPrompt] = useState(null)
+  const draftTimer = useRef(null)
 
   useEffect(() => {
     const u1 = subscribe(uid, 'nutritionLog', setLog, { limit: 100 })
@@ -49,8 +56,19 @@ function TodayTab({ uid }) {
       docs.forEach(d => { map[d.id] = d })
       setDietBreaks(map)
     })
+    // Check for draft
+    const draft = loadDraft(DRAFT_KEY)
+    if (draft?.data?.name) setDraftPrompt(draft)
     return () => { u1(); u2() }
   }, [uid])
+
+  // Debounced draft save
+  useEffect(() => {
+    clearTimeout(draftTimer.current)
+    draftTimer.current = setTimeout(() => {
+      if (form.name) saveDraft(DRAFT_KEY, form)
+    }, 500)
+  }, [form])
 
   const todayLog = log.filter(l => l.date === today())
   const totals = todayLog.reduce((acc, n) => ({
@@ -93,36 +111,76 @@ function TodayTab({ uid }) {
     if (!form.name) return
     setSaving(true)
     try {
-      await addEntry(uid, 'nutritionLog', {
+      const data = {
         date: form.date,
+        timeOfDay: form.timeOfDay || null,
         name: form.name,
         kcal: parseFloat(form.kcal) || 0,
         protein: parseFloat(form.protein) || 0,
         carbs: parseFloat(form.carbs) || 0,
         fat: parseFloat(form.fat) || 0,
-      })
-      setForm({ date: today(), name: '', kcal: '', protein: '', carbs: '', fat: '' })
+      }
+      if (editId) {
+        await setEntry(uid, 'nutritionLog', editId, data)
+        setEditId(null)
+      } else {
+        await addEntry(uid, 'nutritionLog', data)
+      }
+      clearDraft(DRAFT_KEY)
+      setForm({ date: today(), timeOfDay: detectTimeOfDay(), name: '', kcal: '', protein: '', carbs: '', fat: '' })
     } finally { setSaving(false) }
   }
 
+  const startEdit = (entry) => {
+    setForm({
+      date: entry.date,
+      timeOfDay: entry.timeOfDay || null,
+      name: entry.name || '',
+      kcal: String(entry.kcal || ''),
+      protein: String(entry.protein || ''),
+      carbs: String(entry.carbs || ''),
+      fat: String(entry.fat || ''),
+    })
+    setEditId(entry.id)
+  }
+
+  const cancelEdit = () => {
+    setEditId(null)
+    setForm({ date: today(), timeOfDay: detectTimeOfDay(), name: '', kcal: '', protein: '', carbs: '', fat: '' })
+  }
+
   const quickLog = async (t) => {
-    await addEntry(uid, 'nutritionLog', { date: today(), name: t.name, kcal: t.kcal, protein: t.protein, carbs: t.carbs, fat: t.fat })
+    await addEntry(uid, 'nutritionLog', { date: today(), timeOfDay: detectTimeOfDay(), name: t.name, kcal: t.kcal, protein: t.protein, carbs: t.carbs, fat: t.fat })
   }
 
   const handleScanResult = ({ name, kcal, protein, carbs, fat }) => {
     setForm(p => ({ ...p, name, kcal: String(kcal), protein: String(protein), carbs: String(carbs), fat: String(fat) }))
   }
 
+  const hasTargets = !!(rawTargets.kcal && rawTargets.protein)
   const macros = [
-    { name: 'Kcal', actual: Math.round(totals.kcal), target: targets.kcal || 2000 },
-    { name: 'Protein g', actual: Math.round(totals.protein), target: targets.protein || 160 },
-    { name: 'Carbs g', actual: Math.round(totals.carbs), target: targets.carbs || 200 },
-    { name: 'Fat g', actual: Math.round(totals.fat), target: targets.fat || 70 },
+    { key: 'kcal',    name: 'Kcal',      actual: Math.round(totals.kcal),    target: targets.kcal    || 2000 },
+    { key: 'protein', name: 'Protein g', actual: Math.round(totals.protein), target: targets.protein || 160  },
+    { key: 'carbs',   name: 'Carbs g',   actual: Math.round(totals.carbs),   target: targets.carbs   || 200  },
+    { key: 'fat',     name: 'Fat g',     actual: Math.round(totals.fat),     target: targets.fat     || 70   },
   ]
 
   return (
     <div className="space-y-4">
       <BarcodeScanner open={scanOpen} onClose={() => setScanOpen(false)} onResult={handleScanResult}/>
+
+      {/* Draft restore prompt */}
+      {draftPrompt && (
+        <div className="card border-accent/30 bg-accent/5">
+          <div className="flex items-center justify-between">
+            <p className="text-sm">Unsaved meal from <span className="text-accent">{draftAgo(draftPrompt.at)}</span> — restore?</p>
+            <div className="flex gap-2">
+              <button onClick={() => { setForm(draftPrompt.data); setDraftPrompt(null) }} className="btn-primary text-xs">Restore</button>
+              <button onClick={() => { clearDraft(DRAFT_KEY); setDraftPrompt(null) }} className="btn-ghost text-xs">Discard</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Diet adherence panel */}
       <div className="card">
@@ -144,7 +202,7 @@ function TodayTab({ uid }) {
         )}
       </div>
 
-      {/* progress bars */}
+      {/* Macro progress bars */}
       <div className="card">
         <div className="card-title flex items-center justify-between">
           <span>Today's Macros</span>
@@ -152,17 +210,23 @@ function TodayTab({ uid }) {
             <Scan size={13}/> Scan
           </button>
         </div>
-        {macros.map(m => {
-          const pct = Math.min(100, targets[m.name.split(' ')[0].toLowerCase()] ? (m.actual / m.target) * 100 : 0)
-          const colour = pct > 105 ? 'bg-danger' : pct > 80 ? 'bg-success' : 'bg-accent'
+        {!hasTargets ? (
+          <p className="text-sm text-muted">Set your macro targets in <span className="text-accent">Nutrition → Macros</span> to see progress bars.</p>
+        ) : macros.map(m => {
+          const rawPct = (m.actual / m.target) * 100
+          const displayPct = Math.min(110, rawPct)
+          const colour = rawPct > 110 ? 'bg-danger' : rawPct >= 100 ? 'bg-success' : rawPct >= 80 ? 'bg-success' : 'bg-accent'
           return (
-            <div key={m.name} className="mb-3">
+            <div key={m.key} className="mb-3">
               <div className="flex justify-between text-xs text-muted mb-1">
                 <span>{m.name}</span>
-                <span>{m.actual} / {m.target}</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-text">{Math.round(rawPct)}%</span>
+                  <span>{m.actual} / {m.target}</span>
+                </div>
               </div>
               <div className="w-full bg-surfaceAlt rounded-full h-2">
-                <div className={`h-2 rounded-full transition-all ${colour}`} style={{ width: `${pct}%` }}/>
+                <div className={`h-2 rounded-full transition-all ${colour}`} style={{ width: `${displayPct}%` }}/>
               </div>
             </div>
           )
@@ -180,13 +244,23 @@ function TodayTab({ uid }) {
         </div>
       )}
 
+      {editId && (
+        <div className="card border-warn/30 bg-warn/5">
+          <p className="text-sm text-warn">Editing meal. <button onClick={cancelEdit} className="underline">Cancel</button></p>
+        </div>
+      )}
+
       <div className="card">
-        <div className="card-title">Log Meal</div>
+        <div className="card-title">{editId ? 'Edit Meal' : 'Log Meal'}</div>
         <form onSubmit={save} className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          <div className="col-span-2 md:col-span-3">
+          <div>
             <label className="label">Date</label>
             <input type="date" className="input" value={form.date}
               onChange={e => setForm(p => ({ ...p, date: e.target.value }))}/>
+          </div>
+          <div>
+            <label className="label">Time of day</label>
+            <TodSelect value={form.timeOfDay} onChange={v => setForm(p => ({ ...p, timeOfDay: v }))}/>
           </div>
           <div className="col-span-2 md:col-span-1">
             <label className="label">Meal name *</label>
@@ -203,8 +277,9 @@ function TodayTab({ uid }) {
                 value={form[f]} onChange={e => setForm(p => ({ ...p, [f]: e.target.value }))}/>
             </div>
           ))}
-          <div className="col-span-2 md:col-span-3">
-            <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Add Meal'}</button>
+          <div className="col-span-2 md:col-span-3 flex gap-2">
+            <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Saving…' : editId ? 'Update Meal' : 'Add Meal'}</button>
+            {editId && <button type="button" onClick={cancelEdit} className="btn-secondary">Cancel</button>}
           </div>
         </form>
       </div>
@@ -214,11 +289,19 @@ function TodayTab({ uid }) {
         {todayLog.length === 0 ? (
           <p className="text-sm text-muted">No meals logged today yet.</p>
         ) : todayLog.map(l => (
-          <div key={l.id} className="flex items-center justify-between bg-bg rounded-lg px-3 py-2 mb-1">
-            <span className="text-sm font-medium">{l.name}</span>
-            <span className="text-xs text-muted">{l.kcal} kcal · {l.protein}P · {l.carbs}C · {l.fat}F</span>
-            <button onClick={() => deleteEntry(uid, 'nutritionLog', l.id)} className="btn-ghost p-1"><Trash2 size={13}/></button>
-          </div>
+          <EditableRow key={l.id}
+            onEdit={() => startEdit(l)}
+            onDelete={() => deleteEntry(uid, 'nutritionLog', l.id)}
+            className="mb-1"
+          >
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-medium">{l.name}</span>
+                <TodChip tod={l.timeOfDay}/>
+              </div>
+              <span className="text-xs text-muted">{l.kcal} kcal · {l.protein}P · {l.carbs}C · {l.fat}F</span>
+            </div>
+          </EditableRow>
         ))}
       </div>
     </div>

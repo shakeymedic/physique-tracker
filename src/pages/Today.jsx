@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
 import { subscribe, addEntry, setEntry, getSettings, getAll } from '../data.js'
-import { format, subDays } from 'date-fns'
-import { CheckSquare, Square, Apple, Trophy, Cloud, Dumbbell } from 'lucide-react'
+import { format, subDays, startOfWeek } from 'date-fns'
+import { CheckSquare, Square, Apple, Trophy, Cloud, Dumbbell, Heart, Activity } from 'lucide-react'
 import { quoteOfTheDay } from '../lib/quotes.js'
 import { isMedDueToday, lastTakenDate } from '../clinical/meds.js'
-import { computeMuscleRecovery, muscleStatus, MUSCLE_STATUS_STYLES } from '../training/exercises.js'
+import { computeMuscleRecovery, muscleStatus } from '../training/exercises.js'
 import WeightChart, { computeWeeklyRate } from '../components/WeightChart.jsx'
+import MoodPicker from '../components/MoodPicker.jsx'
 
 const today = () => format(new Date(), 'yyyy-MM-dd')
 
@@ -18,6 +19,35 @@ function greeting() {
   return 'Good evening'
 }
 
+// Small circular progress ring for "This Week" card
+function Ring({ value = 0, size = 48, label, sub }) {
+  const strokeWidth = 5
+  const r = (size - strokeWidth) / 2
+  const circ = 2 * Math.PI * r
+  const dash = circ * Math.min(1, value)
+  const done = value >= 1
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <div className="relative" style={{ width: size, height: size }}>
+        <svg width={size} height={size} className="rotate-[-90deg]">
+          <circle cx={size / 2} cy={size / 2} r={r}
+            fill="none" stroke="currentColor" strokeWidth={strokeWidth}
+            className="text-surfaceAlt" />
+          <circle cx={size / 2} cy={size / 2} r={r}
+            fill="none" stroke="currentColor" strokeWidth={strokeWidth}
+            strokeDasharray={`${dash} ${circ}`}
+            strokeLinecap="round"
+            className={done ? 'text-success transition-all' : 'text-accent transition-all'} />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-text">
+          {sub}
+        </div>
+      </div>
+      <div className="text-[10px] text-muted text-center leading-tight">{label}</div>
+    </div>
+  )
+}
+
 export default function Today() {
   const { user } = useAuth()
   const uid = user?.uid
@@ -25,6 +55,7 @@ export default function Today() {
 
   const [weights, setWeights] = useState([])
   const [lifts, setLifts] = useState([])
+  const [cardio, setCardio] = useState([])
   const [nutrition, setNutrition] = useState([])
   const [planner, setPlanner] = useState([])
   const [meds, setMeds] = useState([])
@@ -32,19 +63,29 @@ export default function Today() {
   const [completions, setCompletions] = useState({})
   const [settings, setSettings] = useState({})
   const [dietBreaks, setDietBreaks] = useState({})
+  const [wellbeing, setWellbeing] = useState([])
+  const [selfCareLog, setSelfCareLog] = useState([])
 
   // Quick weight log form
   const [wForm, setWForm] = useState({ date: today(), weight: '', bodyfat: '' })
   const [wSaving, setWSaving] = useState(false)
 
+  // Mood quick log state
+  const [moodVal, setMoodVal] = useState(null)
+  const [moodSaving, setMoodSaving] = useState(false)
+  const [moodSaved, setMoodSaved] = useState(false)
+
   useEffect(() => {
     if (!uid) return
     const u1 = subscribe(uid, 'weights', setWeights, { limit: 90 })
     const u2 = subscribe(uid, 'lifts', setLifts, { limit: 200 })
-    const u3 = subscribe(uid, 'nutritionLog', setNutrition, { limit: 100 })
-    const u4 = subscribe(uid, 'planner', setPlanner, { orderByField: 'createdAt' })
-    const u5 = subscribe(uid, 'medications', setMeds, { orderByField: 'createdAt' })
-    const u6 = subscribe(uid, 'medicationLog', setMedLogs, { limit: 200 })
+    const u3 = subscribe(uid, 'cardio', setCardio, { limit: 100 })
+    const u4 = subscribe(uid, 'nutritionLog', setNutrition, { limit: 100 })
+    const u5 = subscribe(uid, 'planner', setPlanner, { orderByField: 'createdAt' })
+    const u6 = subscribe(uid, 'medications', setMeds, { orderByField: 'createdAt' })
+    const u7 = subscribe(uid, 'medicationLog', setMedLogs, { limit: 200 })
+    const u8 = subscribe(uid, 'wellbeing', setWellbeing, { limit: 100 })
+    const u9 = subscribe(uid, 'selfCareLog', setSelfCareLog, { limit: 100 })
     getAll(uid, 'checklistCompletions').then(docs => {
       const map = {}
       docs.forEach(d => { map[d.id] = d })
@@ -55,8 +96,10 @@ export default function Today() {
       docs.forEach(d => { map[d.id] = d })
       setDietBreaks(map)
     })
-    getSettings(uid).then(setSettings)
-    return () => { u1(); u2(); u3(); u4(); u5(); u6() }
+    getSettings(uid).then(s => {
+      setSettings(s)
+    })
+    return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9() }
   }, [uid])
 
   const todayStr = today()
@@ -89,7 +132,6 @@ export default function Today() {
     fat: acc.fat + (parseFloat(n.fat) || 0),
   }), { kcal: 0, protein: 0, carbs: 0, fat: 0 })
 
-  // Check diet break
   const activeDietBreak = dietBreaks[todayStr]
   const rawTargets = settings.nutritionTargets || {}
   const tdee = settings.goal?.tdee || null
@@ -126,8 +168,6 @@ export default function Today() {
     setCompletions(prev => ({ ...prev, [key]: { ...prev[key], done: !done } }))
   }
 
-  // Toggle medication taken today: writes/removes a medicationLog row for today.
-  // We use a doc id of `${date}_${medId}` so it's idempotent and easy to undo.
   const toggleMedTaken = async (med) => {
     const existing = medLogs.find(l => l.date === todayStr && l.medId === med.id)
     if (existing) {
@@ -160,6 +200,45 @@ export default function Today() {
   const readyMuscles = Object.entries(muscleRec).filter(([, d]) => muscleStatus(d) === 'recovered').map(([m]) => m)
   const fatiguedMuscles = Object.entries(muscleRec).filter(([, d]) => muscleStatus(d) === 'fatigued').map(([m]) => m)
 
+  // ── This Week stats ──
+  const weekStart = format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+  const weekLifts = lifts.filter(l => l.date >= weekStart)
+  // Unique lift days (one session per day)
+  const weekGymDays = new Set(weekLifts.map(l => l.date)).size
+  const weekCardioSessions = cardio.filter(c => c.date >= weekStart).length
+  const weekCardioKm = cardio
+    .filter(c => c.date >= weekStart)
+    .reduce((s, c) => s + (parseFloat(c.distance) || 0), 0)
+  const weekSelfCare = selfCareLog.filter(s => s.date >= weekStart).length
+
+  const actGoals = settings.activityGoals || {}
+  const gymGoal = actGoals.gymPerWeek || 3
+  const cardioGoal = actGoals.cardioPerWeek || 2
+  const selfCareGoal = actGoals.selfCarePerWeek || 5
+
+  // ── Today's mood ──
+  const todayWellbeing = wellbeing.find(w => w.date === todayStr)
+  const todayMood = todayWellbeing?.mood ?? null
+
+  const saveMood = async (val) => {
+    if (!uid) return
+    setMoodSaving(true)
+    try {
+      if (todayWellbeing?.id) {
+        await setEntry(uid, 'wellbeing', todayWellbeing.id, { ...todayWellbeing, mood: val })
+      } else {
+        await addEntry(uid, 'wellbeing', { date: todayStr, mood: val })
+      }
+      setMoodSaved(true)
+      setTimeout(() => setMoodSaved(false), 2500)
+    } finally { setMoodSaving(false) }
+  }
+
+  const handleMoodSelect = (val) => {
+    setMoodVal(val)
+    saveMood(val)
+  }
+
   return (
     <div className="space-y-4">
 
@@ -177,10 +256,70 @@ export default function Today() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
+        {/* Mood quick log */}
+        <div className="card">
+          <div className="card-title flex items-center gap-2">
+            <Heart size={16} className="text-accent" /> Mood Today
+          </div>
+          {todayMood !== null ? (
+            <p className="text-xs text-muted mb-2">
+              Logged today:{' '}
+              {['😞','😕','😐','🙂','😄'][todayMood - 1] || '?'}{' '}
+              <button className="text-accent underline text-xs ml-1" onClick={() => setMoodVal(null)}>
+                change
+              </button>
+            </p>
+          ) : null}
+          <MoodPicker
+            value={moodVal ?? todayMood ?? null}
+            onChange={handleMoodSelect}
+          />
+          {moodSaving && <p className="text-xs text-muted mt-2">Saving…</p>}
+          {moodSaved && <p className="text-xs text-success mt-2">✓ Mood saved</p>}
+          <button
+            onClick={() => navigate('/wellbeing')}
+            className="btn-ghost text-xs mt-3"
+          >
+            Full wellbeing log →
+          </button>
+        </div>
+
+        {/* This Week goals */}
+        <div className="card">
+          <div className="card-title flex items-center gap-2">
+            <Activity size={16} className="text-accent" /> This Week
+          </div>
+          <div className="flex justify-around mt-2 mb-3">
+            <Ring
+              value={gymGoal > 0 ? weekGymDays / gymGoal : 0}
+              label="Gym sessions"
+              sub={`${weekGymDays}/${gymGoal}`}
+            />
+            <Ring
+              value={cardioGoal > 0 ? weekCardioSessions / cardioGoal : 0}
+              label="Cardio"
+              sub={`${weekCardioSessions}/${cardioGoal}`}
+            />
+            <Ring
+              value={selfCareGoal > 0 ? weekSelfCare / selfCareGoal : 0}
+              label="Self-care"
+              sub={`${weekSelfCare}/${selfCareGoal}`}
+            />
+          </div>
+          {weekCardioKm > 0 && (
+            <p className="text-xs text-muted">
+              Cardio distance this week: <span className="text-text font-medium">{weekCardioKm.toFixed(1)} km</span>
+            </p>
+          )}
+          <button onClick={() => navigate('/training')} className="btn-ghost text-xs mt-2">
+            View training →
+          </button>
+        </div>
+
         {/* Quick weight log */}
         <div className="card">
           <div className="card-title flex items-center gap-2">
-            <Cloud size={16} className="text-accent"/> Quick Weight Log
+            <Cloud size={16} className="text-accent" /> Quick Weight Log
           </div>
           {todayWeight ? (
             <div className="mb-3 text-sm">
@@ -193,17 +332,17 @@ export default function Today() {
             <div>
               <label className="label">Date</label>
               <input type="date" className="input w-36" value={wForm.date}
-                onChange={e => setWForm(p => ({ ...p, date: e.target.value }))}/>
+                onChange={e => setWForm(p => ({ ...p, date: e.target.value }))} />
             </div>
             <div>
               <label className="label">Weight (kg)</label>
               <input type="number" step="0.1" min="30" max="300" className="input w-24" placeholder="kg"
-                value={wForm.weight} onChange={e => setWForm(p => ({ ...p, weight: e.target.value }))}/>
+                value={wForm.weight} onChange={e => setWForm(p => ({ ...p, weight: e.target.value }))} />
             </div>
             <div>
               <label className="label">BF% (opt)</label>
               <input type="number" step="0.1" min="3" max="60" className="input w-20" placeholder="%"
-                value={wForm.bodyfat} onChange={e => setWForm(p => ({ ...p, bodyfat: e.target.value }))}/>
+                value={wForm.bodyfat} onChange={e => setWForm(p => ({ ...p, bodyfat: e.target.value }))} />
             </div>
             <button type="submit" className="btn-primary" disabled={wSaving || !wForm.weight}>
               {wSaving ? 'Saving…' : 'Save'}
@@ -211,12 +350,13 @@ export default function Today() {
           </form>
           {w30.length > 1 && (
             <div className="mt-3">
-              <WeightChart weights={w30} goalSettings={settings.goal} height={100} compact/>
+              <WeightChart weights={w30} goalSettings={settings.goal} height={100} compact />
             </div>
           )}
           {weeklyRate !== null && (
             <div className="mt-2 text-xs text-muted">
-              Last 7d: <span className={weeklyRate < 0 ? 'text-success' : 'text-warn'}>
+              Last 7d:{' '}
+              <span className={weeklyRate < 0 ? 'text-success' : 'text-warn'}>
                 {weeklyRate > 0 ? '+' : ''}{weeklyRate} kg/week
               </span>
               {targetRate && (
@@ -232,7 +372,7 @@ export default function Today() {
         {/* Macros today */}
         <div className="card">
           <div className="card-title flex items-center gap-2">
-            <Apple size={16} className="text-accent"/> Macros Today
+            <Apple size={16} className="text-accent" /> Macros Today
           </div>
           <div className="space-y-2 mb-3">
             {macros.map(m => {
@@ -245,7 +385,7 @@ export default function Today() {
                     <span>{m.actual} / {m.target}</span>
                   </div>
                   <div className="w-full bg-surfaceAlt rounded-full h-1.5">
-                    <div className={`h-1.5 rounded-full transition-all ${colour}`} style={{ width: `${pct}%` }}/>
+                    <div className={`h-1.5 rounded-full transition-all ${colour}`} style={{ width: `${pct}%` }} />
                   </div>
                 </div>
               )
@@ -259,9 +399,8 @@ export default function Today() {
         {/* Today's checklist */}
         <div className="card">
           <div className="card-title flex items-center gap-2">
-            <CheckSquare size={16} className="text-accent"/> Today's Checklist
+            <CheckSquare size={16} className="text-accent" /> Today's Checklist
           </div>
-          {/* Planner items */}
           {todayPlannerItems.length === 0 && medsDueToday.length === 0 ? (
             <p className="text-sm text-muted">Nothing scheduled. Add tasks in Planner or Meds.</p>
           ) : (
@@ -277,8 +416,8 @@ export default function Today() {
                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePlannerItem(item) } }}
                     className="flex items-center gap-3 cursor-pointer select-none py-1 -mx-1 px-1 rounded hover:bg-surfaceAlt/40 active:bg-surfaceAlt">
                     {done
-                      ? <CheckSquare size={16} className="text-success shrink-0"/>
-                      : <Square size={16} className="text-muted shrink-0"/>}
+                      ? <CheckSquare size={16} className="text-success shrink-0" />
+                      : <Square size={16} className="text-muted shrink-0" />}
                     <span className={`text-sm ${done ? 'line-through text-muted' : 'text-text'}`}>{item.title}</span>
                   </li>
                 )
@@ -293,20 +432,14 @@ export default function Today() {
                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleMedTaken(med) } }}
                     className="flex items-center gap-3 cursor-pointer select-none py-1 -mx-1 px-1 rounded hover:bg-surfaceAlt/40 active:bg-surfaceAlt">
                     {taken
-                      ? <CheckSquare size={18} className="text-success shrink-0"/>
-                      : <Square size={18} className="text-warn shrink-0"/>}
+                      ? <CheckSquare size={18} className="text-success shrink-0" />
+                      : <Square size={18} className="text-warn shrink-0" />}
                     <span className={`text-sm flex-1 ${taken ? 'line-through text-muted' : 'text-text'}`}>
                       {med.name} {med.dose}{med.unit}
                     </span>
-                    {med.frequency === 'weekly' && (
-                      <span className="chip-warn text-xs">Weekly</span>
-                    )}
-                    {med.frequency === 'daily' && (
-                      <span className="chip-warn text-xs">Daily</span>
-                    )}
-                    {med.frequency === 'specific-days' && (
-                      <span className="chip-warn text-xs">Scheduled</span>
-                    )}
+                    {med.frequency === 'weekly' && <span className="chip-warn text-xs">Weekly</span>}
+                    {med.frequency === 'daily' && <span className="chip-warn text-xs">Daily</span>}
+                    {med.frequency === 'specific-days' && <span className="chip-warn text-xs">Scheduled</span>}
                   </li>
                 )
               })}
@@ -317,7 +450,7 @@ export default function Today() {
         {/* Muscle recovery summary */}
         <div className="card">
           <div className="card-title flex items-center gap-2">
-            <Dumbbell size={16} className="text-accent"/> Recovery Status
+            <Dumbbell size={16} className="text-accent" /> Recovery Status
           </div>
           {readyMuscles.length > 0 && (
             <p className="text-xs text-success mb-1">
@@ -332,6 +465,12 @@ export default function Today() {
           {readyMuscles.length === 0 && fatiguedMuscles.length === 0 && (
             <p className="text-xs text-muted">Log training sessions to see recovery status.</p>
           )}
+          {/* Cardio this week summary */}
+          <p className="text-xs text-muted mt-2">
+            Cardio this week:{' '}
+            <span className="text-text font-medium">{weekCardioSessions} session{weekCardioSessions !== 1 ? 's' : ''}</span>
+            {weekCardioKm > 0 && <> · <span className="text-text font-medium">{weekCardioKm.toFixed(1)} km</span></>}
+          </p>
           <button onClick={() => navigate('/training')} className="btn-ghost text-xs mt-2">
             View full heatmap →
           </button>
@@ -343,7 +482,7 @@ export default function Today() {
       {todayPRs.length > 0 && (
         <div className="card border-warn/30 bg-warn/5">
           <div className="card-title flex items-center gap-2">
-            <Trophy size={16} className="text-warn"/> New PRs Today!
+            <Trophy size={16} className="text-warn" /> New PRs Today!
           </div>
           <div className="flex flex-wrap gap-2">
             {todayPRs.map(pr => (
