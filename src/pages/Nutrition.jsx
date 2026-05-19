@@ -156,32 +156,101 @@ function TodayTab({ uid }) {
 }
 
 // ── Macros calculator ─────────────────────────────────────────────────────────
+// Goal-driven: user picks a target rate of weight change (kg/week) and we work out
+// the daily kcal delta from the 7700 kcal-per-kg-of-fat heuristic, capping the
+// rate to safe ranges (≤1% bodyweight/week loss; ≤0.5% gain). Then macros are
+// computed from LBM (protein 2.2 g/kg LBM, fat 25% kcal, carbs fill).
 function MacrosTab({ uid }) {
-  const [form, setForm] = useState({ weight: '', bodyfat: '', activity: 1.55, goal: 0 })
+  const [form, setForm] = useState({
+    weight: '', bodyfat: '', activity: 1.55,
+    goalType: 'lose', // 'lose' | 'maintain' | 'gain'
+    rateKgPerWeek: 0.5,
+    targetWeight: '',
+  })
   const [result, setResult] = useState(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+
+  // pre-fill from latest weight on mount
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      const { getAll } = await import('../data.js')
+      const rows = await getAll(uid, 'weights', { orderByField: 'date', dir: 'desc' })
+      if (alive && rows.length > 0) {
+        setForm(p => ({
+          ...p,
+          weight: p.weight || String(rows[0].weight ?? ''),
+          bodyfat: p.bodyfat || (rows[0].bodyfat ? String(rows[0].bodyfat) : ''),
+        }))
+      }
+    })()
+    return () => { alive = false }
+  }, [uid])
 
   const calc = () => {
     const w = parseFloat(form.weight)
     const bf = parseFloat(form.bodyfat)
     if (!w || !bf) return
+
     const lbm = w * (1 - bf / 100)
     const bmr = 370 + 21.6 * lbm // Katch-McArdle
     const tdee = bmr * parseFloat(form.activity)
-    const goalAdj = parseFloat(form.goal)
-    const kcal = Math.round(tdee * (1 + goalAdj / 100))
+
+    // Cap rates to safe limits and derive daily kcal delta from 7700 kcal/kg fat.
+    let rate = parseFloat(form.rateKgPerWeek) || 0
+    let cappedRate = rate
+    let warning = ''
+    if (form.goalType === 'lose') {
+      const safeMax = +(w * 0.01).toFixed(2) // 1%/week
+      if (rate > safeMax) { cappedRate = safeMax; warning = `Capped to safe max of ${safeMax} kg/week (1% of bodyweight).` }
+    } else if (form.goalType === 'gain') {
+      const safeMax = +(w * 0.005).toFixed(2) // 0.5%/week to limit fat gain
+      if (rate > safeMax) { cappedRate = safeMax; warning = `Capped to ${safeMax} kg/week to limit fat gain (0.5% of bodyweight).` }
+    } else {
+      cappedRate = 0
+    }
+
+    const dailyDelta = (form.goalType === 'lose' ? -1 : form.goalType === 'gain' ? 1 : 0) * (cappedRate * 7700 / 7)
+    let kcal = Math.round(tdee + dailyDelta)
+
+    // Floor at BMR for safety (never below resting metabolic needs)
+    const floor = Math.round(bmr)
+    if (kcal < floor) { kcal = floor; warning = (warning ? warning + ' ' : '') + `Kcal floored at BMR (${floor}).` }
+
     const protein = Math.round(lbm * 2.2)
     const fat = Math.round((kcal * 0.25) / 9)
-    const carbs = Math.round((kcal - protein * 4 - fat * 9) / 4)
-    setResult({ bmr: Math.round(bmr), tdee: Math.round(tdee), kcal, protein, carbs, fat })
+    const carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4))
+
+    // Time to target (if set)
+    let timeToTarget = null
+    const tw = parseFloat(form.targetWeight)
+    if (tw && cappedRate > 0 && form.goalType !== 'maintain') {
+      const diff = Math.abs(w - tw)
+      const weeks = diff / cappedRate
+      timeToTarget = { weeks: Math.round(weeks), eta: addWeeksISO(weeks) }
+    }
+
+    setResult({
+      bmr: Math.round(bmr), tdee: Math.round(tdee), kcal,
+      protein, carbs, fat,
+      cappedRate, dailyDelta: Math.round(dailyDelta), warning, timeToTarget,
+    })
   }
 
   const saveTargets = async () => {
     if (!result) return
     setSaving(true)
     try {
-      await saveSettings(uid, { nutritionTargets: { kcal: result.kcal, protein: result.protein, carbs: result.carbs, fat: result.fat } })
+      await saveSettings(uid, {
+        nutritionTargets: { kcal: result.kcal, protein: result.protein, carbs: result.carbs, fat: result.fat },
+        goal: {
+          type: form.goalType,
+          rateKgPerWeek: result.cappedRate,
+          targetWeight: form.targetWeight ? parseFloat(form.targetWeight) : null,
+          updatedAt: new Date().toISOString(),
+        },
+      })
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } finally { setSaving(false) }
@@ -190,8 +259,9 @@ function MacrosTab({ uid }) {
   return (
     <div className="space-y-4">
       <div className="card">
-        <div className="card-title">Katch-McArdle Calculator</div>
-        <div className="grid grid-cols-2 gap-3 mb-4">
+        <div className="card-title">Goal-Driven Macros</div>
+        <p className="text-xs text-muted mb-3">Uses the Katch-McArdle formula. Set a goal type and target rate — we'll work out the daily calorie delta and macros, capped to safe limits.</p>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
           <div>
             <label className="label">Weight (kg)</label>
             <input type="number" step="0.1" className="input" value={form.weight}
@@ -211,30 +281,53 @@ function MacrosTab({ uid }) {
           </div>
           <div>
             <label className="label">Goal</label>
-            <select className="input" value={form.goal}
-              onChange={e => setForm(p => ({ ...p, goal: e.target.value }))}>
-              <option value={-20}>Cut (−20%)</option>
-              <option value={0}>Maintain</option>
-              <option value={10}>Lean Bulk (+10%)</option>
+            <select className="input" value={form.goalType}
+              onChange={e => setForm(p => ({ ...p, goalType: e.target.value }))}>
+              <option value="lose">Lose fat</option>
+              <option value="maintain">Maintain</option>
+              <option value="gain">Lean gain</option>
             </select>
           </div>
+          {form.goalType !== 'maintain' && (
+            <>
+              <div>
+                <label className="label">Rate (kg/week)</label>
+                <input type="number" step="0.1" min="0" className="input" value={form.rateKgPerWeek}
+                  onChange={e => setForm(p => ({ ...p, rateKgPerWeek: e.target.value }))}/>
+              </div>
+              <div>
+                <label className="label">Target weight (kg, optional)</label>
+                <input type="number" step="0.1" className="input" placeholder="e.g. 90" value={form.targetWeight}
+                  onChange={e => setForm(p => ({ ...p, targetWeight: e.target.value }))}/>
+              </div>
+            </>
+          )}
         </div>
         <button onClick={calc} className="btn-primary">Calculate</button>
 
         {result && (
-          <div className="mt-4 space-y-2">
-            <div className="grid grid-cols-2 gap-2 text-sm">
+          <div className="mt-4 space-y-3">
+            {result.warning && (
+              <div className="text-xs text-warn bg-warn/10 rounded-lg px-3 py-2">⚠ {result.warning}</div>
+            )}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
               <div className="bg-bg rounded-lg p-3">
                 <div className="text-muted text-xs mb-1">BMR</div>
                 <div className="text-accent font-semibold">{result.bmr} kcal</div>
               </div>
               <div className="bg-bg rounded-lg p-3">
-                <div className="text-muted text-xs mb-1">TDEE</div>
+                <div className="text-muted text-xs mb-1">TDEE (maintenance)</div>
                 <div className="text-accent font-semibold">{result.tdee} kcal</div>
               </div>
               <div className="bg-bg rounded-lg p-3">
-                <div className="text-muted text-xs mb-1">Target kcal</div>
-                <div className="text-accent font-bold text-lg">{result.kcal}</div>
+                <div className="text-muted text-xs mb-1">Daily {result.dailyDelta < 0 ? 'deficit' : result.dailyDelta > 0 ? 'surplus' : 'delta'}</div>
+                <div className="font-semibold" style={{ color: result.dailyDelta < 0 ? '#ef4444' : result.dailyDelta > 0 ? '#10b981' : '#94a3b8' }}>
+                  {result.dailyDelta > 0 ? '+' : ''}{result.dailyDelta} kcal/day
+                </div>
+              </div>
+              <div className="bg-bg rounded-lg p-3 col-span-2 md:col-span-3">
+                <div className="text-muted text-xs mb-1">Daily kcal target</div>
+                <div className="text-accent font-bold text-2xl">{result.kcal}</div>
               </div>
               <div className="bg-bg rounded-lg p-3">
                 <div className="text-muted text-xs mb-1">Protein</div>
@@ -249,7 +342,14 @@ function MacrosTab({ uid }) {
                 <div className="text-text font-semibold">{result.fat}g <span className="text-xs text-muted">({result.fat*9} kcal)</span></div>
               </div>
             </div>
-            <button onClick={saveTargets} className="btn-secondary" disabled={saving}>
+
+            {result.timeToTarget && (
+              <div className="text-sm text-muted bg-bg rounded-lg px-3 py-2">
+                At {result.cappedRate} kg/week → ~{result.timeToTarget.weeks} weeks to target. ETA <span className="text-text">{result.timeToTarget.eta}</span>.
+              </div>
+            )}
+
+            <button onClick={saveTargets} className="btn-primary" disabled={saving}>
               {saved ? '✓ Saved!' : saving ? 'Saving…' : 'Save as my targets'}
             </button>
           </div>
@@ -257,6 +357,12 @@ function MacrosTab({ uid }) {
       </div>
     </div>
   )
+}
+
+function addWeeksISO(weeks) {
+  const d = new Date()
+  d.setDate(d.getDate() + Math.round(weeks * 7))
+  return format(d, 'd MMM yyyy')
 }
 
 // ── Meal Templates ────────────────────────────────────────────────────────────
