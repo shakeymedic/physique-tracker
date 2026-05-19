@@ -303,17 +303,22 @@ function MacrosTab({ uid }) {
     const dailyDelta = (form.goalType === 'lose' ? -1 : form.goalType === 'gain' ? 1 : 0) * (cappedRate * 7700 / 7)
     let kcal = Math.round(tdee + dailyDelta)
 
-    // Floor: use user's kcal floor (default 1500), but never below BMR if user-set floor is
-    // unrealistically low. We respect the higher of (user floor, BMR).
+    // Floor: lower of (user's kcal floor, BMR). This intentionally lets kcal
+    // dip below BMR if the user has set a lower kcal floor — the user's setting
+    // wins. Note: prolonged intake below BMR is not recommended; the calculator
+    // surfaces a soft warning instead of overriding the value.
     const userFloor = parseFloat(form.kcalFloor) || DEFAULT_KCAL_FLOOR
     const bmrFloor = Math.round(bmr)
-    const effectiveFloor = Math.max(userFloor, bmrFloor)
+    const effectiveFloor = Math.min(userFloor, bmrFloor)
     if (kcal < effectiveFloor) {
       kcal = effectiveFloor
-      const reason = userFloor > bmrFloor
+      const reason = effectiveFloor === userFloor
         ? `Kcal floored at your minimum (${userFloor}).`
-        : `Kcal floored at BMR (${bmrFloor}). Your floor of ${userFloor} is below BMR.`
+        : `Kcal floored at BMR (${bmrFloor}).`
       warning = (warning ? warning + ' ' : '') + reason
+    }
+    if (kcal < bmrFloor) {
+      warning = (warning ? warning + ' ' : '') + `Note: ${kcal} kcal is below your BMR (${bmrFloor}). Prolonged intake below BMR is generally not advised.`
     }
 
     // Protein: based on bodyweight or LBM, multiplied by g/kg preference
