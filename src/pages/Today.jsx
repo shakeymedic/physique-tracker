@@ -304,6 +304,9 @@ export default function Today() {
                     {med.frequency === 'daily' && (
                       <span className="chip-warn text-xs">Daily</span>
                     )}
+                    {med.frequency === 'specific-days' && (
+                      <span className="chip-warn text-xs">Scheduled</span>
+                    )}
                   </li>
                 )
               })}
