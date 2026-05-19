@@ -126,6 +126,18 @@ export default function Today() {
     setCompletions(prev => ({ ...prev, [key]: { ...prev[key], done: !done } }))
   }
 
+  // Toggle medication taken today: writes/removes a medicationLog row for today.
+  // We use a doc id of `${date}_${medId}` so it's idempotent and easy to undo.
+  const toggleMedTaken = async (med) => {
+    const existing = medLogs.find(l => l.date === todayStr && l.medId === med.id)
+    if (existing) {
+      const { deleteEntry } = await import('../data.js')
+      await deleteEntry(uid, 'medicationLog', existing.id)
+    } else {
+      await addEntry(uid, 'medicationLog', { date: todayStr, medId: med.id, name: med.name, dose: med.dose, unit: med.unit })
+    }
+  }
+
   // ── PRs today ──
   const todayLifts = lifts.filter(l => l.date === todayStr)
   const todayPRs = todayLifts.flatMap(l => l.prs || [])
@@ -258,8 +270,12 @@ export default function Today() {
                 const key = `${todayStr}_${item.id}`
                 const done = completions[key]?.done
                 return (
-                  <li key={item.id} className="flex items-center gap-3 cursor-pointer"
-                    onClick={() => togglePlannerItem(item)}>
+                  <li key={item.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => togglePlannerItem(item)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePlannerItem(item) } }}
+                    className="flex items-center gap-3 cursor-pointer select-none py-1 -mx-1 px-1 rounded hover:bg-surfaceAlt/40 active:bg-surfaceAlt">
                     {done
                       ? <CheckSquare size={16} className="text-success shrink-0"/>
                       : <Square size={16} className="text-muted shrink-0"/>}
@@ -270,10 +286,15 @@ export default function Today() {
               {medsDueToday.map(med => {
                 const taken = medLogs.some(l => l.date === todayStr && l.medId === med.id)
                 return (
-                  <li key={med.id} className="flex items-center gap-3">
+                  <li key={med.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => toggleMedTaken(med)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleMedTaken(med) } }}
+                    className="flex items-center gap-3 cursor-pointer select-none py-1 -mx-1 px-1 rounded hover:bg-surfaceAlt/40 active:bg-surfaceAlt">
                     {taken
-                      ? <CheckSquare size={16} className="text-success shrink-0"/>
-                      : <Square size={16} className="text-warn shrink-0"/>}
+                      ? <CheckSquare size={18} className="text-success shrink-0"/>
+                      : <Square size={18} className="text-warn shrink-0"/>}
                     <span className={`text-sm flex-1 ${taken ? 'line-through text-muted' : 'text-text'}`}>
                       {med.name} {med.dose}{med.unit}
                     </span>
