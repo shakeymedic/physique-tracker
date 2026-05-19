@@ -5,14 +5,11 @@ import { format, subDays } from 'date-fns'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts'
-import { Plus, Trash2, Timer as TimerIcon, Play, Pause, RotateCcw } from 'lucide-react'
+import { Plus, Trash2, Play, Pause, RotateCcw, Trophy } from 'lucide-react'
+import MicButton from '../components/MicButton.jsx'
+import { EXERCISES as EX_LIST, computeMuscleRecovery, muscleStatus, MUSCLE_REGIONS, MUSCLE_STATUS_STYLES } from '../training/exercises.js'
 
-const EXERCISES = [
-  'Bench Press','Squat','Deadlift','Overhead Press','Barbell Row','Pull-Up',
-  'Romanian Deadlift','Front Squat','Incline Bench','Dumbbell Bench','Lat Pulldown',
-  'Bicep Curl','Tricep Extension','Leg Press','Leg Curl','Leg Extension',
-  'Calf Raise','Lateral Raise','Face Pull','Hip Thrust','Dip','Push-Up',
-]
+const EXERCISES = EX_LIST.map(e => e.name)
 
 const RPE_OPTIONS = [5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10]
 const today = () => format(new Date(), 'yyyy-MM-dd')
@@ -21,7 +18,7 @@ const epley = (w, r) => parseFloat(w) * (1 + parseFloat(r) / 30)
 function Tabs({ active, set }) {
   return (
     <div className="flex gap-2 mb-4 flex-wrap">
-      {['Log','Templates','History','Timer'].map(t => (
+      {['Log','Templates','History','Recovery','Timer'].map(t => (
         <button key={t} onClick={() => set(t)} className={active === t ? 'btn-primary' : 'btn-secondary'}>{t}</button>
       ))}
     </div>
@@ -37,8 +34,12 @@ function LogTab({ uid }) {
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const [templates, setTemplates] = useState([])
+  const [liftsAll, setLiftsAll] = useState([])
 
-  useEffect(() => { getAll(uid, 'workoutTemplates').then(setTemplates) }, [uid])
+  useEffect(() => {
+    getAll(uid, 'workoutTemplates').then(setTemplates)
+    getAll(uid, 'lifts').then(setLiftsAll)
+  }, [uid])
 
   const addSet = () => {
     if (!setForm.weight || !setForm.reps) return
@@ -50,9 +51,20 @@ function LogTab({ uid }) {
     if (!sets.length) return
     setSaving(true)
     try {
-      await addEntry(uid, 'lifts', { date, exercise, sets, notes })
+      // PR detection: compare best e1RM vs all-time
+      const newBest = Math.max(...sets.map(s => epley(s.weight, s.reps)))
+      let allTimeBest = 0
+      liftsAll.filter(l => l.exercise === exercise).forEach(l => {
+        ;(l.sets || []).forEach(s => {
+          const e = epley(s.weight, s.reps)
+          if (e > allTimeBest) allTimeBest = e
+        })
+      })
+      const prs = newBest > allTimeBest && allTimeBest > 0 ? [exercise] : []
+      await addEntry(uid, 'lifts', { date, exercise, sets, notes, ...(prs.length ? { prs } : {}) })
       setSets([])
       setNotes('')
+      if (prs.length) alert(`🏆 New PR — ${exercise}! ${newBest.toFixed(1)} kg e1RM`)
     } finally { setSaving(false) }
   }
 
@@ -138,8 +150,11 @@ function LogTab({ uid }) {
 
         <div className="mb-3">
           <label className="label">Notes</label>
-          <input type="text" className="input" placeholder="Optional notes"
-            value={notes} onChange={e => setNotes(e.target.value)}/>
+          <div className="flex gap-2">
+            <input type="text" className="input" placeholder="Optional notes"
+              value={notes} onChange={e => setNotes(e.target.value)}/>
+            <MicButton onTranscript={t => setNotes(prev => (prev ? prev + ' ' + t : t))}/>
+          </div>
         </div>
 
         <div className="flex gap-2">
@@ -229,7 +244,10 @@ function HistoryTab({ uid }) {
             <button
               className="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-surfaceAlt transition-colors"
               onClick={() => setExpanded(p => ({ ...p, [l.id]: !p[l.id] }))}>
-              <span className="font-medium">{l.exercise}</span>
+              <span className="font-medium flex items-center gap-2">
+                {l.exercise}
+                {l.prs?.length > 0 && <Trophy size={13} className="text-warn"/>}
+              </span>
               <span className="text-muted">{l.date}</span>
             </button>
             {expanded[l.id] && (
@@ -318,6 +336,49 @@ function TimerTab() {
   )
 }
 
+// ── Recovery (Muscle Heatmap) ───────────────────────────────────────────────
+function RecoveryTab({ uid }) {
+  const [lifts, setLifts] = useState([])
+  useEffect(() => subscribe(uid, 'lifts', setLifts, { limit: 500 }), [uid])
+
+  const todayStr = format(new Date(), 'yyyy-MM-dd')
+  const recovery = computeMuscleRecovery(lifts, todayStr)
+
+  return (
+    <div className="space-y-4">
+      <div className="card">
+        <div className="card-title flex items-center gap-2">
+          <Trophy size={16} className="text-accent"/> Muscle Recovery Heatmap
+        </div>
+        <p className="text-xs text-muted mb-3">
+          <span className="text-danger">■</span> Fatigued (today)
+          <span className="ml-2 text-warn">■</span> 1d
+          <span className="ml-2 text-yellow-400">■</span> 2d
+          <span className="ml-2 text-success">■</span> Recovered (3-5d)
+          <span className="ml-2 text-muted">■</span> Undertrained / no data
+        </p>
+        <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
+          {MUSCLE_REGIONS.map(muscle => {
+            const daysAgo = recovery[muscle]
+            const status = muscleStatus(daysAgo)
+            const styles = MUSCLE_STATUS_STYLES[status]
+            return (
+              <div key={muscle}
+                className={`rounded-xl p-3 text-center ${styles.bg}`}>
+                <div className={`text-xs font-medium ${styles.text}`}>{muscle}</div>
+                <div className="text-xs text-muted mt-0.5">
+                  {daysAgo === null ? 'No data' : daysAgo === 0 ? 'Today' : `${daysAgo}d ago`}
+                </div>
+                <div className={`text-xs font-semibold mt-0.5 ${styles.text}`}>{styles.label}</div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Training() {
   const { user } = useAuth()
   const uid = user?.uid
@@ -328,6 +389,7 @@ export default function Training() {
       {tab === 'Log' && <LogTab uid={uid}/>}
       {tab === 'Templates' && <TemplatesTab uid={uid}/>}
       {tab === 'History' && <HistoryTab uid={uid}/>}
+      {tab === 'Recovery' && <RecoveryTab uid={uid}/>}
       {tab === 'Timer' && <TimerTab/>}
     </div>
   )

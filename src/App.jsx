@@ -1,9 +1,13 @@
 import { Routes, Route, NavLink, Navigate } from 'react-router-dom'
-import { LogOut, LayoutDashboard, Dumbbell, Apple, Activity, Pill, Camera, Settings, Ruler, ClipboardList, Sparkles } from 'lucide-react'
+import { LogOut, LayoutDashboard, Dumbbell, Apple, Activity, Pill, Camera, Settings,
+  Ruler, ClipboardList, Sparkles, Sun, Moon, Cloud, CloudOff, Home } from 'lucide-react'
 import { useAuth } from './auth.jsx'
 import { isConfigured } from './firebase.js'
+import { useTheme } from './theme.jsx'
+import { useEffect, useState } from 'react'
 import Login from './pages/Login.jsx'
-import Dashboard from './pages/Dashboard.jsx'
+import Today from './pages/Today.jsx'
+import Insights from './pages/Dashboard.jsx'
 import BodyLog from './pages/BodyLog.jsx'
 import Training from './pages/Training.jsx'
 import Nutrition from './pages/Nutrition.jsx'
@@ -13,9 +17,11 @@ import Photos from './pages/Photos.jsx'
 import Planner from './pages/Planner.jsx'
 import Coach from './pages/Coach.jsx'
 import SettingsPage from './pages/Settings.jsx'
+import UpdateToast from './components/UpdateToast.jsx'
 
 const tabs = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
+  { to: '/', label: 'Today', icon: Home, end: true },
+  { to: '/insights', label: 'Insights', icon: LayoutDashboard },
   { to: '/body', label: 'Body', icon: Ruler },
   { to: '/training', label: 'Training', icon: Dumbbell },
   { to: '/nutrition', label: 'Nutrition', icon: Apple },
@@ -27,8 +33,23 @@ const tabs = [
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
 
+function SyncIndicator() {
+  const [online, setOnline] = useState(navigator.onLine)
+  useEffect(() => {
+    const on = () => setOnline(true)
+    const off = () => setOnline(false)
+    window.addEventListener('online', on)
+    window.addEventListener('offline', off)
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
+  }, [])
+  return online
+    ? <Cloud size={16} className="text-accent" title="Synced"/>
+    : <CloudOff size={16} className="text-danger" title="Offline"/>
+}
+
 export default function App() {
   const { user, loading, signOutUser } = useAuth()
+  const { theme, setTheme } = useTheme()
 
   if (!isConfigured) return <ConfigMissing />
   if (loading) return <div className="min-h-screen flex items-center justify-center text-muted">Loading…</div>
@@ -45,13 +66,22 @@ export default function App() {
               <div className="text-xs text-muted leading-tight">{user.displayName || user.email}</div>
             </div>
           </div>
-          <button onClick={signOutUser} className="btn-ghost" title="Sign out"><LogOut size={16}/></button>
+          <div className="flex items-center gap-1">
+            <SyncIndicator/>
+            <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              className="btn-ghost" title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
+              {theme === 'dark' ? <Sun size={16}/> : <Moon size={16}/>}
+            </button>
+            <button onClick={signOutUser} className="btn-ghost" title="Sign out"><LogOut size={16}/></button>
+          </div>
         </div>
         <nav className="max-w-6xl mx-auto px-2 flex gap-1 overflow-x-auto no-scrollbar">
           {tabs.map(t => (
             <NavLink key={t.to} to={t.to} end={t.end} className={({isActive}) =>
               `shrink-0 flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg mb-2 transition-colors ${isActive ? 'bg-accent/15 text-accent' : 'text-muted hover:text-text'}`}>
-              <t.icon size={16}/> {t.label}
+              <t.icon size={16} className="md:shrink-0"/>
+              <span className="hidden md:inline">{t.label}</span>
+              <span className="md:hidden">{t.label}</span>
             </NavLink>
           ))}
         </nav>
@@ -59,7 +89,8 @@ export default function App() {
 
       <main className="max-w-6xl mx-auto px-4 py-4">
         <Routes>
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/" element={<Today />} />
+          <Route path="/insights" element={<Insights />} />
           <Route path="/body" element={<BodyLog />} />
           <Route path="/training" element={<Training />} />
           <Route path="/nutrition" element={<Nutrition />} />
@@ -69,9 +100,13 @@ export default function App() {
           <Route path="/planner" element={<Planner />} />
           <Route path="/coach" element={<Coach />} />
           <Route path="/settings" element={<SettingsPage />} />
+          {/* Legacy redirect */}
+          <Route path="/dashboard" element={<Navigate to="/insights" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
+
+      <UpdateToast/>
     </div>
   )
 }

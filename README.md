@@ -76,3 +76,28 @@ Settings → **Export data as CSV** dumps every collection. Useful for backups o
 - All Firestore data is namespaced under `users/{uid}/...` and protected by the rules in `firestore.rules`. No-one but you can read or write your data.
 - API keys for Spoonacular and Gemini are stored in your private Firestore settings doc — they never leave your project.
 - Photos are uploaded to Firebase Storage under `users/{uid}/photos/...`.
+
+## v2 Features
+
+### Push notifications (FCM)
+1. In Firebase console → **Project Settings → Cloud Messaging → Web push certificates**, click **Generate key pair**
+2. Copy the resulting VAPID key
+3. Add to `.env.local`: `VITE_FIREBASE_VAPID_KEY=<your-key>`
+4. Also fill in `public/firebase-messaging-sw.js` with your Firebase config values
+5. In the app: Settings → **Enable push notifications**
+
+Note: Actually *sending* scheduled notifications requires Cloud Functions (planned for v3). The current implementation registers the device to receive messages.
+
+### Google Drive backup
+1. In Google Cloud Console → **APIs & Services → Credentials**, create an **OAuth 2.0 Client ID** (Web application)
+2. Add your app domain to **Authorized JavaScript origins**
+3. Copy the Client ID to `.env.local`: `VITE_GOOGLE_CLIENT_ID=<your-client-id>`
+4. In the app: Settings → **Back up now**
+
+If Drive backup fails (OAuth not configured), use **Export All Data** (CSV) instead.
+
+### Barcode scanner
+Requires camera permission. Scans EAN-13/UPC-A barcodes and looks up products in the Open Food Facts database. Falls back to manual barcode entry if camera access is denied.
+
+### Theme toggle
+Sun/moon icon in the header switches between dark (default) and light modes. Preference is persisted in `localStorage`.

@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../auth.jsx'
 import { subscribe, getAll, getSettings, setEntry } from '../data.js'
-import { format, subDays, isToday, parseISO } from 'date-fns'
+import { format, subDays, addWeeks } from 'date-fns'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, ReferenceLine, CartesianGrid,
+  ResponsiveContainer, CartesianGrid,
 } from 'recharts'
-import { CheckSquare, Square, TrendingUp, Dumbbell, Droplets, Activity } from 'lucide-react'
+import { CheckSquare, Square, TrendingUp, Dumbbell, Droplets, Activity, Target } from 'lucide-react'
 import { flag } from '../clinical/ranges.js'
+import WeightChart, { computeWeeklyRate } from '../components/WeightChart.jsx'
 
 function FlagChip({ name, value, sex }) {
   const f = flag(name, value, sex)
@@ -16,7 +17,7 @@ function FlagChip({ name, value, sex }) {
   return <span className={cls}>{value}</span>
 }
 
-export default function Dashboard() {
+export default function Insights() {
   const { user } = useAuth()
   const uid = user?.uid
   const [weights, setWeights] = useState([])
@@ -86,21 +87,6 @@ export default function Dashboard() {
     { name: 'Fat', actual: Math.round(totals.fat), target: targets.fat || 70 },
   ]
 
-  // --- Latest lifts e1RM ---
-  const keyLifts = ['Bench Press', 'Squat', 'Deadlift']
-  const cutoff90 = format(subDays(new Date(), 90), 'yyyy-MM-dd')
-  const liftSummary = keyLifts.map(ex => {
-    const sessions = lifts.filter(l => l.exercise === ex && l.date >= cutoff90)
-    let best = 0
-    sessions.forEach(s => {
-      (s.sets || []).forEach(set => {
-        const e = parseFloat(set.weight || 0) * (1 + parseFloat(set.reps || 0) / 30)
-        if (e > best) best = e
-      })
-    })
-    return { exercise: ex, e1rm: best > 0 ? best.toFixed(1) : null }
-  })
-
   // --- Latest BP ---
   const latestBP = bloods.find(b => b.systolic || b.diastolic)
   const bpTrend = bloods.filter(b => b.systolic).slice(0, 10).reverse()
@@ -109,28 +95,107 @@ export default function Dashboard() {
   // --- Latest HbA1c ---
   const latestHba1c = bloods.find(b => b.hba1c)
 
+  // ── Goal panel ──
+  const goal = settings.goal || {}
+  const latestWeight = weights.length > 0 ? parseFloat(weights[0].weight) : null
+  const cutoff90 = format(subDays(new Date(), 90), 'yyyy-MM-dd')
+  const w90 = weights.filter(w => w.date >= cutoff90).sort((a, b) => a.date.localeCompare(b.date))
+  const startWeight = goal.startWeight || (w90.length > 0 ? parseFloat(w90[0].weight) : null)
+  const weeklyRate = computeWeeklyRate(weights)
+  const targetWeightGoal = goal.targetWeight
+  const rateKgPerWeek = goal.rateKgPerWeek
+  const goalType = goal.type
+
+  let projectedETA = null
+  if (latestWeight && targetWeightGoal && rateKgPerWeek) {
+    const diff = Math.abs(latestWeight - targetWeightGoal)
+    const weeks = diff / rateKgPerWeek
+    if (weeks < 200) projectedETA = format(addWeeks(new Date(), weeks), 'd MMM yyyy')
+  }
+
+  // Actual vs target weekly rate comparison
+  let rateStatus = null
+  if (weeklyRate !== null && rateKgPerWeek) {
+    const actual = goalType === 'lose' ? -weeklyRate : weeklyRate
+    if (actual >= rateKgPerWeek * 0.8 && actual <= rateKgPerWeek * 1.3) rateStatus = 'on'
+    else if (actual < rateKgPerWeek * 0.8) rateStatus = 'behind'
+    else rateStatus = 'ahead'
+  }
+
+  // All-time PR per exercise
+  const allPRs = {}
+  const epleyCalc = (w, r) => parseFloat(w) * (1 + parseFloat(r) / 30)
+  ;['Bench Press','Squat','Deadlift','Overhead Press','Barbell Row','Pull-Up'].forEach(ex => {
+    let best = 0
+    lifts.filter(l => l.exercise === ex).forEach(s => {
+      ;(s.sets || []).forEach(set => {
+        const e = epleyCalc(set.weight, set.reps)
+        if (e > best) best = e
+      })
+    })
+    if (best > 0) allPRs[ex] = best.toFixed(1)
+  })
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-        {/* Weight trend */}
+        {/* Goal Tracker */}
+        {(targetWeightGoal || latestWeight) && (
+          <div className="card md:col-span-2">
+            <div className="card-title flex items-center gap-2"><Target size={16} className="text-accent"/>Goal Tracker</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3 text-sm">
+              {latestWeight && (
+                <div className="bg-bg rounded-xl p-3">
+                  <div className="text-xs text-muted mb-1">Current</div>
+                  <div className="text-accent font-semibold">{latestWeight} kg</div>
+                </div>
+              )}
+              {startWeight && (
+                <div className="bg-bg rounded-xl p-3">
+                  <div className="text-xs text-muted mb-1">Start (90d)</div>
+                  <div className="text-text font-semibold">{parseFloat(startWeight).toFixed(1)} kg</div>
+                </div>
+              )}
+              {targetWeightGoal && (
+                <div className="bg-bg rounded-xl p-3">
+                  <div className="text-xs text-muted mb-1">Target</div>
+                  <div className="text-success font-semibold">{targetWeightGoal} kg</div>
+                </div>
+              )}
+              {projectedETA && (
+                <div className="bg-bg rounded-xl p-3">
+                  <div className="text-xs text-muted mb-1">ETA</div>
+                  <div className="text-text font-semibold">{projectedETA}</div>
+                </div>
+              )}
+            </div>
+            <WeightChart weights={w90} goalSettings={goal} height={180}/>
+            {rateStatus && weeklyRate !== null && (
+              <div className={`mt-3 text-xs rounded-lg px-3 py-2 ${
+                rateStatus === 'on' ? 'bg-success/10 text-success'
+                  : rateStatus === 'behind' ? 'bg-warn/10 text-warn'
+                  : 'bg-accent/10 text-accent'
+              }`}>
+                Last 7 days: {weeklyRate > 0 ? '+' : ''}{weeklyRate} kg/week
+                {rateKgPerWeek && <> · Target: {goalType === 'lose' ? '-' : '+'}{rateKgPerWeek} kg/week</>}
+                {' '}· {rateStatus === 'on' ? '✅ On track' : rateStatus === 'behind' ? '⚠ Behind target' : '📈 Ahead of target'}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Weight trend (fallback if no goal set) */}
+        {!targetWeightGoal && (
         <div className="card">
           <div className="card-title flex items-center gap-2"><TrendingUp size={16} className="text-accent"/>Weight Trend</div>
           {weightData.length > 1 ? (
-            <ResponsiveContainer width="100%" height={160}>
-              <LineChart data={weightData}>
-                <CartesianGrid stroke="#334155" strokeDasharray="3 3"/>
-                <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd"/>
-                <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} domain={['auto', 'auto']} width={36}/>
-                <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', color: '#f1f5f9' }}/>
-                <Line type="monotone" dataKey="weight" stroke="#22d3ee" dot={false} strokeWidth={1.5}/>
-                <Line type="monotone" dataKey="avg" stroke="#f59e0b" dot={false} strokeWidth={1.5} strokeDasharray="4 2"/>
-              </LineChart>
-            </ResponsiveContainer>
+            <WeightChart weights={w30} height={160}/>
           ) : (
             <p className="text-sm text-muted py-8 text-center">No weight data yet — log your first entry in Body.</p>
           )}
         </div>
+        )}
 
         {/* Today's Checklist */}
         <div className="card">
@@ -168,18 +233,18 @@ export default function Dashboard() {
           </ResponsiveContainer>
         </div>
 
-        {/* Latest lifts */}
+        {/* Personal Records */}
         <div className="card">
-          <div className="card-title flex items-center gap-2"><Dumbbell size={16} className="text-accent"/>Best e1RM (90d)</div>
-          {liftSummary.every(l => !l.e1rm) ? (
+          <div className="card-title flex items-center gap-2"><Dumbbell size={16} className="text-accent"/>Personal Records</div>
+          {Object.keys(allPRs).length === 0 ? (
             <p className="text-sm text-muted">No lifts logged yet. Head to Training.</p>
           ) : (
-            <div className="grid grid-cols-3 gap-2">
-              {liftSummary.map(l => (
-                <div key={l.exercise} className="bg-bg rounded-xl p-3 text-center">
-                  <div className="text-xs text-muted mb-1">{l.exercise.split(' ')[0]}</div>
-                  <div className="text-lg font-semibold text-accent">{l.e1rm ? `${l.e1rm}` : '—'}</div>
-                  {l.e1rm && <div className="text-xs text-muted">kg e1RM</div>}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+              {Object.entries(allPRs).map(([ex, e1rm]) => (
+                <div key={ex} className="bg-bg rounded-xl p-3 text-center">
+                  <div className="text-xs text-muted mb-1">{ex.split(' ').slice(0, 2).join(' ')}</div>
+                  <div className="text-base font-semibold text-accent">{e1rm}</div>
+                  <div className="text-xs text-muted">kg e1RM</div>
                 </div>
               ))}
             </div>

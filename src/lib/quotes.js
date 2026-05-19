@@ -1,0 +1,37 @@
+export const QUOTES = [
+  'Action precedes motivation.',
+  'Consistency beats intensity.',
+  'The hard days build you.',
+  'Small steps. Every day.',
+  'Track it. Improve it.',
+  'Do the work.',
+  'Show up. Then show out.',
+  'Progress, not perfection.',
+  'One more rep. One more day.',
+  'Discipline is freedom.',
+  'Earn it today.',
+  'The only bad workout is the one that didn\'t happen.',
+  'Your future self is watching.',
+  'Commit. Show up. Repeat.',
+  'Strong mind builds a strong body.',
+  'Every log entry is a vote for who you want to become.',
+  'Delayed gratification wins.',
+  'You\'re closer than you think.',
+  'Rest is part of the programme.',
+  'Data doesn\'t lie — log everything.',
+  'Small consistent actions compound.',
+  'Fatigue is temporary. Progress is permanent.',
+  'Compete only with yesterday\'s version of you.',
+  'Focus on the process, the results follow.',
+  'Hard choices, easy life.',
+  'You don\'t have to be great to start.',
+  'Earn your rest.',
+  'The grind doesn\'t care how you feel.',
+  'Today\'s effort is tomorrow\'s strength.',
+  'Build the body that carries your ambitions.',
+  'Stay the course.',
+]
+
+export function quoteOfTheDay() {
+  return QUOTES[new Date().getDate() % QUOTES.length]
+}

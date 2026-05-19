@@ -1,7 +1,24 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../auth.jsx'
-import { getSettings, saveSettings, getAll } from '../data.js'
-import { Download, LogOut, Save } from 'lucide-react'
+import { getSettings, saveSettings, getAll, addEntry } from '../data.js'
+import { Download, LogOut, Save, CloudUpload, Bell, BellOff, Database } from 'lucide-react'
+import { requestNotificationPermission } from '../lib/messaging.js'
+import { backupToDrive } from '../lib/drive.js'
+
+const SEED_MEALS = [
+  { name: 'Porridge with banana', kcal: 380, protein: 14, carbs: 60, fat: 8 },
+  { name: 'Greek yoghurt with berries', kcal: 220, protein: 22, carbs: 18, fat: 6 },
+  { name: 'Eggs on toast (2 eggs, 2 slices)', kcal: 380, protein: 22, carbs: 32, fat: 18 },
+  { name: 'Chicken & rice bowl', kcal: 550, protein: 45, carbs: 60, fat: 12 },
+  { name: 'Tuna jacket potato', kcal: 480, protein: 30, carbs: 65, fat: 8 },
+  { name: 'Salmon, sweet potato, broccoli', kcal: 560, protein: 38, carbs: 45, fat: 22 },
+  { name: 'Chicken pasta', kcal: 600, protein: 42, carbs: 75, fat: 12 },
+  { name: 'Beef stir fry & noodles', kcal: 620, protein: 38, carbs: 70, fat: 18 },
+  { name: 'Protein shake (whey + milk)', kcal: 250, protein: 32, carbs: 14, fat: 6 },
+  { name: 'Peanut butter on toast', kcal: 320, protein: 12, carbs: 30, fat: 18 },
+  { name: 'Apple + almonds (30g)', kcal: 260, protein: 7, carbs: 22, fat: 16 },
+  { name: 'Chicken Caesar salad', kcal: 420, protein: 38, carbs: 12, fat: 24 },
+]
 
 function Section({ title, children }) {
   return (
@@ -25,10 +42,18 @@ export default function Settings() {
     nutritionFat: '',
     spoonacularKey: '',
     geminiApiKey: '',
+    lastDriveBackup: '',
   })
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [seeding, setSeeding] = useState(false)
+  const [seedMsg, setSeedMsg] = useState('')
+  const [pushEnabled, setPushEnabled] = useState(false)
+  const [pushMsg, setPushMsg] = useState('')
+  const [driveMsg, setDriveMsg] = useState('')
+  const [driveBacking, setDriveBacking] = useState(false)
+  const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY
 
   useEffect(() => {
     if (!uid) return
@@ -42,6 +67,7 @@ export default function Settings() {
         nutritionFat: s.nutritionTargets?.fat || '',
         spoonacularKey: s.spoonacularKey || '',
         geminiApiKey: s.geminiApiKey || '',
+        lastDriveBackup: s.lastDriveBackup || '',
       })
     })
   }, [uid])
@@ -65,6 +91,48 @@ export default function Settings() {
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
     } finally { setSaving(false) }
+  }
+
+  const seedMeals = async () => {
+    setSeeding(true); setSeedMsg('')
+    try {
+      const existing = await getAll(uid, 'mealTemplates')
+      const existingNames = new Set(existing.map(t => t.name))
+      let added = 0
+      for (const meal of SEED_MEALS) {
+        if (!existingNames.has(meal.name)) {
+          await addEntry(uid, 'mealTemplates', meal)
+          added++
+        }
+      }
+      setSeedMsg(added > 0 ? `Added ${added} meal templates.` : 'All templates already exist.')
+    } catch (e) {
+      setSeedMsg('Error: ' + e.message)
+    } finally { setSeeding(false) }
+  }
+
+  const enablePush = async () => {
+    setPushMsg('')
+    try {
+      const token = await requestNotificationPermission(uid, vapidKey)
+      if (token) { setPushEnabled(true); setPushMsg('Push notifications enabled!') }
+      else { setPushMsg('Permission denied or unavailable.') }
+    } catch (e) { setPushMsg(e.message) }
+  }
+
+  const doBackupToDrive = async () => {
+    setDriveBacking(true); setDriveMsg('')
+    try {
+      const COLLECTIONS = ['weights','measurements','lifts','nutritionLog','bloods','medications','medicationLog','planner','mealTemplates','workoutTemplates']
+      const allData = {}
+      for (const col of COLLECTIONS) { allData[col] = await getAll(uid, col) }
+      await backupToDrive(allData)
+      const ts = new Date().toISOString()
+      await saveSettings(uid, { lastDriveBackup: ts })
+      setDriveMsg('Backup complete: ' + new Date(ts).toLocaleString())
+    } catch (e) {
+      setDriveMsg('Drive backup failed: ' + e.message + '. Use CSV export instead.')
+    } finally { setDriveBacking(false) }
   }
 
   const exportAll = async () => {
@@ -163,6 +231,40 @@ export default function Settings() {
         <button onClick={exportAll} className="btn-secondary" disabled={exporting}>
           <Download size={14}/> {exporting ? 'Exporting…' : 'Export All Data'}
         </button>
+      </Section>
+
+      <Section title="UK Meal Templates">
+        <p className="text-sm text-muted mb-3">Seed 12 common UK meal templates to your Meals list for quick logging.</p>
+        <button onClick={seedMeals} className="btn-secondary" disabled={seeding}>
+          <Database size={14}/> {seeding ? 'Seeding…' : 'Seed UK Meal Templates'}
+        </button>
+        {seedMsg && <p className="text-xs text-success mt-2">{seedMsg}</p>}
+      </Section>
+
+      <Section title="Google Drive Backup">
+        <p className="text-sm text-muted mb-2">Back up all your data as a JSON file to Google Drive.</p>
+        <p className="text-xs text-muted mb-3">Requires <code className="text-accent">VITE_GOOGLE_CLIENT_ID</code> in <code>.env.local</code>. If Drive backup fails, use CSV export above.</p>
+        {form.lastDriveBackup && (
+          <p className="text-xs text-muted mb-2">Last backup: {new Date(form.lastDriveBackup).toLocaleString()}</p>
+        )}
+        <button onClick={doBackupToDrive} className="btn-secondary" disabled={driveBacking}>
+          <CloudUpload size={14}/> {driveBacking ? 'Backing up…' : 'Back up now'}
+        </button>
+        {driveMsg && <p className="text-xs mt-2" style={{ color: driveMsg.includes('failed') ? '#ef4444' : '#10b981' }}>{driveMsg}</p>}
+      </Section>
+
+      <Section title="Push Notifications">
+        <p className="text-sm text-muted mb-2">Push notifications are set up but require a backend to send reminders. Daily reminders coming in v3 — for now, the in-app checklist serves as your reminder.</p>
+        {!vapidKey ? (
+          <p className="text-xs text-muted">Configure <code className="text-accent">VITE_FIREBASE_VAPID_KEY</code> in <code>.env.local</code> to enable push notifications.</p>
+        ) : (
+          <>
+            <button onClick={enablePush} className="btn-secondary" disabled={pushEnabled}>
+              {pushEnabled ? <><Bell size={14}/> Notifications enabled</> : <><BellOff size={14}/> Enable push notifications</>}
+            </button>
+            {pushMsg && <p className="text-xs mt-2" style={{ color: pushMsg.includes('denied') || pushMsg.includes('Error') ? '#ef4444' : '#10b981' }}>{pushMsg}</p>}
+          </>
+        )}
       </Section>
 
       <Section title="Account">

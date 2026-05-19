@@ -3,6 +3,7 @@ import { useAuth } from '../auth.jsx'
 import { subscribe, addEntry, setEntry, deleteEntry, getAll } from '../data.js'
 import { format } from 'date-fns'
 import { Pill, Plus, Trash2, CheckCircle, Circle } from 'lucide-react'
+import { isMedDueToday, lastTakenDate } from '../clinical/meds.js'
 
 const today = () => format(new Date(), 'yyyy-MM-dd')
 
@@ -86,6 +87,12 @@ export default function Medications() {
   }
 
   const daily = meds.filter(m => m.frequency === 'daily')
+  // Weekly meds due today
+  const weeklyDueToday = meds.filter(m => {
+    if (m.frequency !== 'weekly') return false
+    const lt = lastTakenDate(logs, m.id)
+    return isMedDueToday(m, todayStr, lt)
+  })
   const other = meds.filter(m => m.frequency !== 'daily')
 
   return (
@@ -188,6 +195,33 @@ export default function Medications() {
                           <Trash2 size={13}/>
                         </button>
                       </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {weeklyDueToday.length > 0 && (
+            <div className="card border-warn/30">
+              <div className="card-title flex items-center gap-2">
+                <span className="chip-warn">Due today</span> Weekly Medications
+              </div>
+              <div className="space-y-2">
+                {weeklyDueToday.map(med => {
+                  const taken = isTakenToday(med.id)
+                  return (
+                    <div key={med.id} className={`flex items-center justify-between rounded-xl p-3 ${taken ? 'bg-success/10 border border-success/20' : 'bg-warn/10'}`}>
+                      <div className="flex items-center gap-3">
+                        {taken ? <CheckCircle size={18} className="text-success shrink-0"/> : <Circle size={18} className="text-warn shrink-0"/>}
+                        <div>
+                          <div className="text-sm font-medium text-text">{med.name}</div>
+                          <div className="text-xs text-muted">{med.dose} {med.unit} · {med.timeOfDay} · weekly</div>
+                        </div>
+                      </div>
+                      {!taken && (
+                        <button onClick={() => markTaken(med)} className="btn-secondary text-xs py-1">Mark taken</button>
+                      )}
                     </div>
                   )
                 })}

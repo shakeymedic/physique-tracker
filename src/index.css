@@ -31,3 +31,25 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin
 /* hide scrollbar in tab bar */
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }
+
+/* ── Light theme overrides ─────────────────────────────────────────────────── */
+html.light body {
+  background-color: #f1f5f9;
+  color: #0f172a;
+}
+html.light .bg-bg { background-color: #f1f5f9 !important; }
+html.light .bg-surface { background-color: #ffffff !important; }
+html.light .bg-surfaceAlt { background-color: #e2e8f0 !important; }
+html.light .bg-bg\/90 { background-color: rgba(241,245,249,0.92) !important; }
+html.light .text-text { color: #0f172a !important; }
+html.light .text-muted { color: #475569 !important; }
+html.light .border-border\/30 { border-color: rgba(148,163,184,0.3) !important; }
+html.light .border-border\/40 { border-color: rgba(148,163,184,0.4) !important; }
+html.light .border-border\/60 { border-color: rgba(148,163,184,0.6) !important; }
+html.light .btn-secondary { background-color: #e2e8f0 !important; color: #0f172a !important; }
+html.light .btn-secondary:hover { background-color: #cbd5e1 !important; }
+html.light .btn-ghost { color: #475569 !important; }
+html.light .btn-ghost:hover { background-color: #e2e8f0 !important; color: #0f172a !important; }
+html.light .input { background-color: #f8fafc !important; border-color: rgba(148,163,184,0.6) !important; color: #0f172a !important; }
+html.light .input::placeholder { color: #94a3b8 !important; }
+html.light .card { background-color: #ffffff !important; border-color: rgba(148,163,184,0.25) !important; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }

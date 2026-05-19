@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../auth.jsx'
-import { subscribe, addEntry, deleteEntry, getSettings, saveSettings } from '../data.js'
+import { subscribe, addEntry, deleteEntry, setEntry, getSettings, saveSettings, getAll } from '../data.js'
 import { format } from 'date-fns'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts'
-import { Trash2, Plus } from 'lucide-react'
+import { Trash2, Plus, Scan, Coffee } from 'lucide-react'
+import BarcodeScanner from '../components/BarcodeScanner.jsx'
+import MicButton from '../components/MicButton.jsx'
 
 const today = () => format(new Date(), 'yyyy-MM-dd')
 
@@ -34,11 +36,19 @@ function TodayTab({ uid }) {
   const [settings, setSettings] = useState({})
   const [form, setForm] = useState({ date: today(), name: '', kcal: '', protein: '', carbs: '', fat: '' })
   const [saving, setSaving] = useState(false)
+  const [scanOpen, setScanOpen] = useState(false)
+  const [dietBreaks, setDietBreaks] = useState({})
+  const [dbSaving, setDbSaving] = useState(false)
 
   useEffect(() => {
     const u1 = subscribe(uid, 'nutritionLog', setLog, { limit: 100 })
     const u2 = subscribe(uid, 'mealTemplates', setTemplates, { orderByField: 'createdAt', limit: 50 })
     getSettings(uid).then(setSettings)
+    getAll(uid, 'dietBreaks').then(docs => {
+      const map = {}
+      docs.forEach(d => { map[d.id] = d })
+      setDietBreaks(map)
+    })
     return () => { u1(); u2() }
   }, [uid])
 
@@ -50,7 +60,33 @@ function TodayTab({ uid }) {
     fat: acc.fat + (parseFloat(n.fat) || 0),
   }), { kcal: 0, protein: 0, carbs: 0, fat: 0 })
 
-  const targets = settings.nutritionTargets || {}
+  const todayStr = today()
+  const activeDietBreak = dietBreaks[todayStr]
+  const rawTargets = settings.nutritionTargets || {}
+  const targets = activeDietBreak
+    ? { kcal: settings.goal?.tdee || rawTargets.kcal || 2000, protein: rawTargets.protein || 160, carbs: rawTargets.carbs || 200, fat: rawTargets.fat || 70 }
+    : rawTargets
+
+  const setRefeed = async (type) => {
+    setDbSaving(true)
+    try {
+      await setEntry(uid, 'dietBreaks', todayStr, { date: todayStr, type })
+      setDietBreaks(prev => ({ ...prev, [todayStr]: { date: todayStr, type } }))
+    } finally { setDbSaving(false) }
+  }
+
+  const setDietBreakWeek = async () => {
+    setDbSaving(true)
+    try {
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(); d.setDate(d.getDate() + i)
+        const ds = format(d, 'yyyy-MM-dd')
+        await setEntry(uid, 'dietBreaks', ds, { date: ds, type: 'break' })
+      }
+      const refreshed = await getAll(uid, 'dietBreaks')
+      const map = {}; refreshed.forEach(d => { map[d.id] = d }); setDietBreaks(map)
+    } finally { setDbSaving(false) }
+  }
 
   const save = async (e) => {
     e.preventDefault()
@@ -73,6 +109,10 @@ function TodayTab({ uid }) {
     await addEntry(uid, 'nutritionLog', { date: today(), name: t.name, kcal: t.kcal, protein: t.protein, carbs: t.carbs, fat: t.fat })
   }
 
+  const handleScanResult = ({ name, kcal, protein, carbs, fat }) => {
+    setForm(p => ({ ...p, name, kcal: String(kcal), protein: String(protein), carbs: String(carbs), fat: String(fat) }))
+  }
+
   const macros = [
     { name: 'Kcal', actual: Math.round(totals.kcal), target: targets.kcal || 2000 },
     { name: 'Protein g', actual: Math.round(totals.protein), target: targets.protein || 160 },
@@ -82,9 +122,36 @@ function TodayTab({ uid }) {
 
   return (
     <div className="space-y-4">
+      <BarcodeScanner open={scanOpen} onClose={() => setScanOpen(false)} onResult={handleScanResult}/>
+
+      {/* Diet adherence panel */}
+      <div className="card">
+        <div className="card-title flex items-center gap-2"><Coffee size={16} className="text-accent"/>Diet Adherence</div>
+        {activeDietBreak ? (
+          <div className="flex items-center gap-3">
+            <span className="chip-warn">{activeDietBreak.type === 'refeed' ? '🍽 Refeed day' : '🛌 Diet break'}</span>
+            <span className="text-xs text-muted">Maintenance calories active today</span>
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => setRefeed('refeed')} disabled={dbSaving} className="btn-secondary text-xs">
+              Today is a refeed day
+            </button>
+            <button onClick={setDietBreakWeek} disabled={dbSaving} className="btn-secondary text-xs">
+              Diet break (1 week)
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* progress bars */}
       <div className="card">
-        <div className="card-title">Today's Macros</div>
+        <div className="card-title flex items-center justify-between">
+          <span>Today's Macros</span>
+          <button onClick={() => setScanOpen(true)} className="btn-secondary text-xs gap-1">
+            <Scan size={13}/> Scan
+          </button>
+        </div>
         {macros.map(m => {
           const pct = Math.min(100, targets[m.name.split(' ')[0].toLowerCase()] ? (m.actual / m.target) * 100 : 0)
           const colour = pct > 105 ? 'bg-danger' : pct > 80 ? 'bg-success' : 'bg-accent'
@@ -123,8 +190,11 @@ function TodayTab({ uid }) {
           </div>
           <div className="col-span-2 md:col-span-1">
             <label className="label">Meal name *</label>
-            <input type="text" className="input" placeholder="e.g. Chicken & rice"
-              value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}/>
+            <div className="flex gap-2">
+              <input type="text" className="input" placeholder="e.g. Chicken & rice"
+                value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}/>
+              <MicButton onTranscript={t => setForm(p => ({ ...p, name: t }))}/>
+            </div>
           </div>
           {['kcal','protein','carbs','fat'].map(f => (
             <div key={f}>

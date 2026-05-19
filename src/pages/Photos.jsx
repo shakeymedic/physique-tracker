@@ -2,9 +2,67 @@ import { useEffect, useState, useRef } from 'react'
 import { useAuth } from '../auth.jsx'
 import { uploadPhoto, listPhotos, deletePhoto, getAll } from '../data.js'
 import { format } from 'date-fns'
-import { Camera, Trash2, GitCompare, X, Upload } from 'lucide-react'
+import { Camera, Trash2, GitCompare, X, Upload, Clock } from 'lucide-react'
 
 const LABELS = ['front', 'side', 'back']
+
+function TimelineTab({ photos, weights }) {
+  const [enlarged, setEnlarged] = useState(null)
+  const sorted = [...photos].sort((a, b) => a.date.localeCompare(b.date))
+
+  const getWeight = (date) => {
+    if (!weights.length) return null
+    // find exact match or nearest
+    const exact = weights.find(w => w.date === date)
+    if (exact) return exact.weight
+    const sorted = [...weights].sort((a, b) =>
+      Math.abs(new Date(a.date) - new Date(date)) - Math.abs(new Date(b.date) - new Date(date))
+    )
+    return sorted[0]?.weight || null
+  }
+
+  if (sorted.length === 0) {
+    return (
+      <div className="card text-center py-8">
+        <Clock size={40} className="text-muted mx-auto mb-2"/>
+        <p className="text-sm text-muted">No photos yet. Upload some to see the timeline.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {enlarged && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setEnlarged(null)}>
+          <img src={enlarged.url} alt={enlarged.label}
+            className="max-h-[85vh] max-w-full rounded-2xl object-contain"/>
+          <button className="absolute top-4 right-4 btn-ghost bg-bg/60 rounded-lg p-2">
+            <X size={18}/>
+          </button>
+        </div>
+      )}
+
+      <div className="card">
+        <div className="card-title">Photo Timeline</div>
+        <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">
+          {sorted.map(p => {
+            const w = getWeight(p.date)
+            return (
+              <div key={p.id} className="shrink-0 cursor-pointer" onClick={() => setEnlarged(p)}>
+                <img src={p.url} alt={p.label}
+                  className="w-24 h-32 object-cover rounded-xl hover:opacity-90 transition-opacity"/>
+                <div className="text-xs text-muted text-center mt-1">{p.date.slice(5)}</div>
+                {w && <div className="text-xs text-accent text-center">{w} kg</div>}
+                <div className="text-xs text-muted text-center capitalize">{p.label}</div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function Photos() {
   const { user } = useAuth()
@@ -18,6 +76,7 @@ export default function Photos() {
   const [preview, setPreview] = useState(null)
   const [selected, setSelected] = useState([])
   const [compareMode, setCompareMode] = useState(false)
+  const [view, setView] = useState('gallery') // 'gallery' | 'timeline'
   const fileRef = useRef()
 
   useEffect(() => {
@@ -108,17 +167,30 @@ export default function Photos() {
         </form>
       </div>
 
-      {/* Compare mode toggle */}
-      <div className="flex items-center gap-3">
-        <button onClick={() => { setCompareMode(c => !c); setSelected([]) }}
-          className={compareMode ? 'btn-primary' : 'btn-secondary'}>
-          <GitCompare size={14}/> {compareMode ? 'Cancel Compare' : 'Compare Photos'}
+      {/* View toggle */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <button onClick={() => { setView('gallery'); setCompareMode(false); setSelected([]) }}
+          className={view === 'gallery' ? 'btn-primary' : 'btn-secondary'}>
+          <Camera size={14}/> Gallery
         </button>
-        {compareMode && <span className="text-sm text-muted">Select 2 photos to compare side-by-side</span>}
+        <button onClick={() => { setView('timeline'); setCompareMode(false); setSelected([]) }}
+          className={view === 'timeline' ? 'btn-primary' : 'btn-secondary'}>
+          <Clock size={14}/> Timeline
+        </button>
+        {view === 'gallery' && (
+          <button onClick={() => { setCompareMode(c => !c); setSelected([]) }}
+            className={compareMode ? 'btn-primary' : 'btn-secondary'}>
+            <GitCompare size={14}/> {compareMode ? 'Cancel Compare' : 'Compare'}
+          </button>
+        )}
+        {compareMode && <span className="text-sm text-muted">Select 2 photos to compare</span>}
       </div>
 
-      {/* Compare view */}
-      {compareMode && selected.length === 2 && (
+      {/* Timeline view */}
+      {view === 'timeline' && <TimelineTab photos={photos} weights={weights}/>}
+
+      {/* Compare view (gallery only) */}
+      {view === 'gallery' && compareMode && selected.length === 2 && (
         <div className="card">
           <div className="card-title">Comparison</div>
           <div className="grid grid-cols-2 gap-4">
@@ -149,7 +221,7 @@ export default function Photos() {
       )}
 
       {/* Gallery */}
-      {Object.keys(grouped).length === 0 ? (
+      {view === 'gallery' && (Object.keys(grouped).length === 0 ? (
         <div className="card text-center py-8">
           <Camera size={40} className="text-muted mx-auto mb-2"/>
           <p className="text-sm text-muted">No photos yet. Upload your first progress photo above.</p>
@@ -185,7 +257,7 @@ export default function Photos() {
             </div>
           </div>
         ))
-      )}
+      ))}
     </div>
   )
 }
