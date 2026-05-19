@@ -1,54 +1,29 @@
 /**
- * ConsistencyHeatmap — GitHub-style 90-day heatmap.
- * Shows daily activity across: weight logged, meals logged, training, meds taken, mood logged.
- *
+ * ConsistencyHeatmap — goal-aware 90-day activity heatmap.
  * Props:
- *   weights: array of { date } objects
- *   nutritionLog: array of { date } objects
- *   lifts: array of { date } objects
- *   cardio: array of { date } objects
- *   medicationLog: array of { date } objects
- *   wellbeing: array of { date } objects
+ *   entries: array of { date: 'YYYY-MM-DD', type: 'lift'|'cardio'|'nutrition'|'wellbeing'|'selfcare' }
+ *   gymGoal: number (sessions per week, default 3)
  *   days: number (default 90)
  */
-import { format, subDays } from 'date-fns'
+import { format, subDays, startOfWeek } from 'date-fns'
 
-const CATEGORIES = [
-  { key: 'weight', label: 'Weight', color: '#22d3ee' },
-  { key: 'meals', label: 'Meals', color: '#10b981' },
-  { key: 'training', label: 'Training', color: '#f59e0b' },
-  { key: 'meds', label: 'Meds', color: '#a78bfa' },
-  { key: 'mood', label: 'Mood', color: '#fb923c' },
-]
-
-export default function ConsistencyHeatmap({
-  weights = [],
-  nutritionLog = [],
-  lifts = [],
-  cardio = [],
-  medicationLog = [],
-  wellbeing = [],
-  days = 90,
-}) {
+export default function ConsistencyHeatmap({ entries = [], gymGoal = 3, days = 90 }) {
   const today = new Date()
-  const startDate = subDays(today, days - 1)
 
-  // Build sets for fast lookup
-  const sets = {
-    weight: new Set(weights.map(w => w.date)),
-    meals: new Set(nutritionLog.map(n => n.date)),
-    training: new Set([...lifts.map(l => l.date), ...cardio.map(c => c.date)]),
-    meds: new Set(medicationLog.map(m => m.date)),
-    mood: new Set(wellbeing.map(w => w.date)),
-  }
+  // Build per-date type sets
+  const byDate = {}
+  entries.forEach(e => {
+    if (!byDate[e.date]) byDate[e.date] = new Set()
+    byDate[e.date].add(e.type)
+  })
 
-  // Build array of day objects
+  // Build day objects
   const dayObjects = []
   for (let i = 0; i < days; i++) {
     const d = subDays(today, days - 1 - i)
     const dateStr = format(d, 'yyyy-MM-dd')
-    const count = CATEGORIES.filter(c => sets[c.key].has(dateStr)).length
-    dayObjects.push({ dateStr, count, d })
+    const types = byDate[dateStr] || new Set()
+    dayObjects.push({ dateStr, types, d })
   }
 
   // Group into weeks (columns of 7)
@@ -57,52 +32,53 @@ export default function ConsistencyHeatmap({
     weeks.push(dayObjects.slice(i, i + 7))
   }
 
-  function cellColor(count) {
-    if (count === 0) return 'bg-surfaceAlt'
-    if (count === 1) return 'bg-accent/20'
-    if (count === 2) return 'bg-accent/40'
-    if (count === 3) return 'bg-accent/60'
-    if (count === 4) return 'bg-accent/80'
-    return 'bg-accent'
+  // Colour logic: primary activity type for the day
+  function cellStyle(types) {
+    if (types.size === 0) return { bg: 'bg-surfaceAlt', opacity: 1 }
+    if (types.has('lift')) return { bg: 'bg-accent', opacity: types.size > 1 ? 1 : 0.85 }
+    if (types.has('cardio')) return { bg: 'bg-success', opacity: 0.85 }
+    if (types.has('nutrition')) return { bg: 'bg-warn', opacity: 0.7 }
+    if (types.has('wellbeing')) return { bg: 'bg-pink-400', opacity: 0.7 }
+    return { bg: 'bg-purple-400', opacity: 0.7 }
   }
+
+  // Weekly gym sessions for goal-hit indicators
+  const weeklyGym = {}
+  entries.filter(e => e.type === 'lift').forEach(e => {
+    const mon = format(startOfWeek(new Date(e.date + 'T00:00:00'), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+    if (!weeklyGym[mon]) weeklyGym[mon] = new Set()
+    weeklyGym[mon].add(e.date)
+  })
 
   return (
     <div>
-      {/* Legend */}
-      <div className="flex flex-wrap gap-3 mb-3">
-        {CATEGORIES.map(c => (
-          <div key={c.key} className="flex items-center gap-1.5 text-xs text-muted">
-            <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: c.color }}/>
-            {c.label}
-          </div>
-        ))}
-      </div>
-
-      {/* Intensity legend */}
-      <div className="flex items-center gap-1.5 text-xs text-muted mb-3">
-        <span>Less</span>
-        {[0,1,2,3,4,5].map(n => (
-          <span key={n} className={`w-3 h-3 rounded-sm inline-block ${cellColor(n)}`}/>
-        ))}
-        <span>More</span>
-      </div>
-
-      {/* Grid */}
       <div className="flex gap-1 overflow-x-auto pb-2">
-        {weeks.map((week, wi) => (
-          <div key={wi} className="flex flex-col gap-1">
-            {week.map((day) => (
-              <div
-                key={day.dateStr}
-                title={`${day.dateStr}: ${day.count}/5 categories`}
-                className={`w-3 h-3 rounded-sm ${cellColor(day.count)} cursor-default transition-all hover:scale-125`}
-              />
-            ))}
-          </div>
-        ))}
+        {weeks.map((week, wi) => {
+          const monDate = week[0]?.dateStr
+          const gymCount = weeklyGym[monDate]?.size || 0
+          const hitGoal = gymCount >= gymGoal
+          return (
+            <div key={wi} className="flex flex-col gap-1">
+              {week.map((day) => {
+                const { bg, opacity } = cellStyle(day.types)
+                const label = [...day.types].join(', ') || 'nothing logged'
+                return (
+                  <div
+                    key={day.dateStr}
+                    title={`${day.dateStr}: ${label}`}
+                    className={`w-3 h-3 rounded-sm ${bg} cursor-default transition-all hover:scale-125`}
+                    style={{ opacity }}
+                  />
+                )
+              })}
+              {/* Goal indicator dot below week column */}
+              <div className={`w-3 h-1 rounded-sm mt-0.5 ${hitGoal ? 'bg-success' : 'bg-surfaceAlt/40'}`}
+                title={`Week gym: ${gymCount}/${gymGoal}`}/>
+            </div>
+          )
+        })}
       </div>
-
-      <p className="text-xs text-muted mt-2">Last {days} days · darker = more categories logged</p>
+      <p className="text-xs text-muted mt-1">Last {days} days · green dot = gym goal hit that week</p>
     </div>
   )
 }

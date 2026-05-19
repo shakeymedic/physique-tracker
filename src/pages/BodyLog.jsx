@@ -64,6 +64,7 @@ function WeightSection({ uid }) {
     date: w.date.slice(5),
     weight: parseFloat(w.weight),
     bf: w.bodyFat ? parseFloat(w.bodyFat) : undefined,
+    lbm: (w.weight && w.bodyFat) ? parseFloat((parseFloat(w.weight) * (1 - parseFloat(w.bodyFat) / 100)).toFixed(1)) : undefined,
   }))
 
   return (
@@ -111,6 +112,7 @@ function WeightSection({ uid }) {
               <Legend wrapperStyle={{ fontSize: 11, color: '#94a3b8' }}/>
               <Line yAxisId="w" type="monotone" dataKey="weight" name="kg" stroke="#22d3ee" dot={false} strokeWidth={1.5}/>
               <Line yAxisId="bf" type="monotone" dataKey="bf" name="BF%" stroke="#f59e0b" dot={false} strokeWidth={1.5}/>
+              <Line yAxisId="w" type="monotone" dataKey="lbm" name="LBM kg" stroke="#10b981" dot={false} strokeWidth={1.5} strokeDasharray="4 2" connectNulls/>
             </LineChart>
           </ResponsiveContainer>
         </div>

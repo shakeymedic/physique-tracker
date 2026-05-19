@@ -77,6 +77,8 @@ export default function Photos() {
   const [selected, setSelected] = useState([])
   const [compareMode, setCompareMode] = useState(false)
   const [view, setView] = useState('gallery') // 'gallery' | 'timeline'
+  const [fullscreenCompare, setFullscreenCompare] = useState(false)
+  const [compareIdx, setCompareIdx] = useState(0)
   const fileRef = useRef()
 
   useEffect(() => {
@@ -191,33 +193,78 @@ export default function Photos() {
 
       {/* Compare view (gallery only) */}
       {view === 'gallery' && compareMode && selected.length === 2 && (
-        <div className="card">
-          <div className="card-title">Comparison</div>
-          <div className="grid grid-cols-2 gap-4">
-            {comparePhotos.map(p => {
-              const w = getWeight(p.date)
+        <>
+          <div className="card">
+            <div className="card-title">Comparison</div>
+            <div className="grid grid-cols-2 gap-4">
+              {comparePhotos.map(p => {
+                const w = getWeight(p.date)
+                return (
+                  <div key={p.id} className="text-center">
+                    <img src={p.url} alt={p.label} className="w-full rounded-xl object-cover aspect-[3/4] cursor-pointer hover:opacity-90"
+                      onClick={() => setFullscreenCompare(true)}/>
+                    <div className="text-sm font-medium mt-2">{p.date}</div>
+                    <div className="text-xs text-muted capitalize">{p.label}</div>
+                    {w && <div className="text-xs text-accent">{w} kg</div>}
+                  </div>
+                )
+              })}
+            </div>
+            {comparePhotos.length === 2 && (() => {
+              const w1 = getWeight(comparePhotos[0].date)
+              const w2 = getWeight(comparePhotos[1].date)
+              if (!w1 || !w2) return null
+              const diff = (parseFloat(w2) - parseFloat(w1)).toFixed(1)
               return (
-                <div key={p.id} className="text-center">
-                  <img src={p.url} alt={p.label} className="w-full rounded-xl object-cover aspect-[3/4]"/>
-                  <div className="text-sm font-medium mt-2">{p.date}</div>
-                  <div className="text-xs text-muted capitalize">{p.label}</div>
-                  {w && <div className="text-xs text-accent">{w} kg</div>}
-                </div>
+                <p className="text-center text-sm mt-2 text-accent">
+                  Weight change: {diff > 0 ? '+' : ''}{diff} kg
+                </p>
               )
-            })}
+            })()}
+            <button onClick={() => setFullscreenCompare(true)} className="btn-secondary text-xs mt-2 flex items-center gap-1 mx-auto">
+              <GitCompare size={13}/> Fullscreen compare
+            </button>
           </div>
-          {comparePhotos.length === 2 && (() => {
-            const w1 = getWeight(comparePhotos[0].date)
-            const w2 = getWeight(comparePhotos[1].date)
-            if (!w1 || !w2) return null
-            const diff = (parseFloat(w2) - parseFloat(w1)).toFixed(1)
-            return (
-              <p className="text-center text-sm mt-2 text-accent">
-                Weight change: {diff > 0 ? '+' : ''}{diff} kg
-              </p>
-            )
-          })()}
-        </div>
+
+          {/* Fullscreen compare overlay */}
+          {fullscreenCompare && (
+            <div className="fixed inset-0 z-50 bg-black flex flex-col">
+              <div className="flex items-center justify-between px-4 py-3 bg-bg/80">
+                <span className="text-sm font-semibold text-text">Compare: {comparePhotos[compareIdx]?.date}</span>
+                <button onClick={() => setFullscreenCompare(false)} className="btn-ghost p-1"><X size={18}/></button>
+              </div>
+              <div className="flex-1 flex items-center justify-center relative overflow-hidden">
+                <img
+                  src={comparePhotos[compareIdx]?.url}
+                  alt={comparePhotos[compareIdx]?.label}
+                  className="max-h-full max-w-full object-contain"
+                />
+                {/* Navigation arrows */}
+                <button
+                  onClick={() => setCompareIdx(i => (i === 0 ? 1 : 0))}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 bg-bg/70 rounded-full p-2 text-text hover:bg-bg"
+                >
+                  ←
+                </button>
+                <button
+                  onClick={() => setCompareIdx(i => (i === 0 ? 1 : 0))}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 bg-bg/70 rounded-full p-2 text-text hover:bg-bg"
+                >
+                  →
+                </button>
+              </div>
+              <div className="px-4 py-3 bg-bg/80 flex justify-center gap-4">
+                {comparePhotos.map((p, i) => (
+                  <button key={p.id} onClick={() => setCompareIdx(i)}
+                    className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${compareIdx === i ? 'bg-accent text-bg border-accent' : 'bg-surfaceAlt text-muted border-border/30'}`}>
+                    {p.date} · {p.label}
+                    {getWeight(p.date) && ` · ${getWeight(p.date)} kg`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Gallery */}

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useAuth } from '../auth.jsx'
-import { getSettings } from '../data.js'
+import { getAll, getSettings } from '../data.js'
 import { Sparkles, Send, ExternalLink } from 'lucide-react'
 
 const SYSTEM_PREAMBLE = "You are an evidence-based fitness and nutrition coach. The user is tracking weight, training, macros and routine bloods. Provide practical, conservative advice. Decline anything outside legitimate, prescribed medical or routine fitness/nutrition guidance — and never advise on anabolic or performance-enhancing drugs."
@@ -13,11 +13,46 @@ export default function Coach() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [dataContext, setDataContext] = useState('')
   const bottomRef = useRef(null)
 
   useEffect(() => {
     if (!uid) return
     getSettings(uid).then(setSettings)
+  }, [uid])
+
+  useEffect(() => {
+    if (!uid) return
+    Promise.all([
+      getSettings(uid),
+      getAll(uid, 'weights', { orderByField: 'date', dir: 'desc' }),
+      getAll(uid, 'nutritionLog'),
+      getAll(uid, 'lifts'),
+    ]).then(([s, wts, nutr, lifts]) => {
+      const latestWeight = wts[0]?.weight
+      const profile = s.profile || {}
+      const targets = s.nutritionTargets || {}
+      const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7)
+      const weekAgoStr = weekAgo.toISOString().slice(0, 10)
+      const recentLifts = lifts.filter(l => l.date >= weekAgoStr)
+      const recentNutr = nutr.filter(n => n.date >= weekAgoStr)
+      const avgKcal = recentNutr.length > 0
+        ? Math.round(Object.values(recentNutr.reduce((acc, n) => {
+            acc[n.date] = (acc[n.date] || 0) + (parseFloat(n.kcal) || 0); return acc
+          }, {})).reduce((a, b) => a + b, 0) / Object.keys(recentNutr.reduce((acc, n) => { acc[n.date] = 1; return acc }, {})).length) : null
+
+      const ctx = [
+        latestWeight ? `Current weight: ${latestWeight} kg` : '',
+        profile.age ? `Age: ${profile.age}` : '',
+        s.goal?.type ? `Goal: ${s.goal.type} weight at ${s.goal.rateKgPerWeek || 0.5} kg/week` : '',
+        targets.kcal ? `Daily kcal target: ${targets.kcal} kcal, protein: ${targets.protein}g` : '',
+        avgKcal ? `Average daily kcal this week: ${avgKcal}` : '',
+        recentLifts.length > 0 ? `Training sessions this week: ${new Set(recentLifts.map(l => l.date)).size}` : '',
+        s.activeProgram?.id ? `Active program: ${s.activeProgram.id}` : '',
+      ].filter(Boolean).join('. ')
+
+      setDataContext(ctx)
+    })
   }, [uid])
 
   useEffect(() => {
@@ -40,8 +75,9 @@ export default function Coach() {
       parts: [{ text: m.text }],
     }))
 
+    const fullPreamble = SYSTEM_PREAMBLE + (dataContext ? `\n\nUser's current data: ${dataContext}` : '')
     const body = {
-      system_instruction: { parts: [{ text: SYSTEM_PREAMBLE }] },
+      system_instruction: { parts: [{ text: fullPreamble }] },
       contents: [
         ...history,
         { role: 'user', parts: [{ text: userMsg }] },

@@ -43,6 +43,7 @@ function TodayTab({ uid }) {
   const [form, setForm] = useState({ date: today(), timeOfDay: detectTimeOfDay(), name: '', kcal: '', protein: '', carbs: '', fat: '', fibre: '' })
   const [saving, setSaving] = useState(false)
   const [scanOpen, setScanOpen] = useState(false)
+  const [saveScannedAsTemplate, setSaveScannedAsTemplate] = useState(false)
   const [dietBreaks, setDietBreaks] = useState({})
   const [dbSaving, setDbSaving] = useState(false)
   const [editId, setEditId] = useState(null)
@@ -146,6 +147,17 @@ function TodayTab({ uid }) {
         setEditId(null)
       } else {
         await addEntry(uid, 'nutritionLog', data)
+      }
+      if (saveScannedAsTemplate && form.name && form.kcal) {
+        await addEntry(uid, 'mealTemplates', {
+          name: form.name,
+          kcal: parseFloat(form.kcal) || 0,
+          protein: parseFloat(form.protein) || 0,
+          carbs: parseFloat(form.carbs) || 0,
+          fat: parseFloat(form.fat) || 0,
+          fibre: parseFloat(form.fibre) || 0,
+        })
+        setSaveScannedAsTemplate(false)
       }
       clearDraft(DRAFT_KEY)
       setForm({ date: today(), timeOfDay: detectTimeOfDay(), name: '', kcal: '', protein: '', carbs: '', fat: '', fibre: '' })
@@ -315,6 +327,21 @@ function TodayTab({ uid }) {
         )}
       </div>
 
+      {/* H: Sticky macro mini-bar */}
+      {hasTargets && (
+        <div className="sticky top-0 z-10 bg-bg/95 backdrop-blur border-b border-border/20 -mx-4 px-4 py-2 flex gap-4 text-xs">
+          <span className={totals.kcal > (targets.kcal || 2000) ? 'text-danger font-semibold' : 'text-muted'}>
+            Kcal: <span className="text-text font-medium">{Math.round(totals.kcal)}</span>/{targets.kcal || 2000}
+          </span>
+          <span className={totals.protein >= (targets.protein || 160) ? 'text-success font-semibold' : 'text-muted'}>
+            P: <span className="text-text font-medium">{Math.round(totals.protein)}</span>g/{targets.protein || 160}g
+          </span>
+          <span className="text-muted ml-auto">
+            {Math.max(0, (targets.kcal || 2000) - Math.round(totals.kcal))} kcal remaining
+          </span>
+        </div>
+      )}
+
       {/* Meal timing breakdown */}
       {todayLog.length > 1 && (
         <div className="card">
@@ -351,6 +378,30 @@ function TodayTab({ uid }) {
         </div>
       )}
 
+      {/* I: Frequently logged meals */}
+      {(() => {
+        const freq = {}
+        log.forEach(l => { if (l.name) freq[l.name] = (freq[l.name] || 0) + 1 })
+        const top = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 5)
+        if (!top.length) return null
+        return (
+          <div className="card">
+            <div className="card-title text-sm">Frequently logged</div>
+            <div className="flex flex-wrap gap-2">
+              {top.map(([name]) => {
+                const tpl = templates.find(t => t.name === name)
+                return (
+                  <button key={name} onClick={() => tpl && quickLog(tpl)} disabled={!tpl}
+                    className="btn-secondary text-xs" title={tpl ? 'Quick-log' : 'No template found'}>
+                    {name}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
+
       {editId && (
         <div className="card border-warn/30 bg-warn/5">
           <p className="text-sm text-warn">Editing meal. <button onClick={cancelEdit} className="underline">Cancel</button></p>
@@ -378,6 +429,14 @@ function TodayTab({ uid }) {
               <MicButton onTranscript={t => setForm(p => ({ ...p, name: t }))}/>
             </div>
           </div>
+          {form.name && form.kcal && (
+            <div className="col-span-2 md:col-span-3 flex items-center gap-2">
+              <input type="checkbox" id="saveTemplate" className="w-4 h-4 accent-accent"
+                checked={saveScannedAsTemplate}
+                onChange={e => setSaveScannedAsTemplate(e.target.checked)}/>
+              <label htmlFor="saveTemplate" className="text-xs text-muted">Save as quick-log template</label>
+            </div>
+          )}
           {[
             { key: 'kcal', label: 'Kcal' },
             { key: 'protein', label: 'Protein (g)' },

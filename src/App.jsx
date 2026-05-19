@@ -53,6 +53,14 @@ function SyncIndicator() {
 export default function App() {
   const { user, loading, signOutUser } = useAuth()
   const { theme, setTheme } = useTheme()
+  const [isOnline, setIsOnline] = useState(navigator.onLine)
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    return () => { window.removeEventListener('online', handleOnline); window.removeEventListener('offline', handleOffline) }
+  }, [])
 
   if (!isConfigured) return <ConfigMissing />
   if (loading) return <div className="min-h-screen flex items-center justify-center text-muted">Loading…</div>
@@ -60,6 +68,11 @@ export default function App() {
 
   return (
     <div className="min-h-screen pb-20">
+      {!isOnline && (
+        <div className="bg-warn/90 text-bg text-xs text-center py-1 px-4 font-medium sticky top-0 z-30">
+          Offline — data will sync when reconnected
+        </div>
+      )}
       <header className="sticky top-0 z-20 bg-bg/90 backdrop-blur border-b border-border/30">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">

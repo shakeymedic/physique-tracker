@@ -3,7 +3,7 @@ import { useAuth } from '../auth.jsx'
 import { subscribe, addEntry, setEntry, deleteEntry, getSettings } from '../data.js'
 import { format, startOfWeek } from 'date-fns'
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
 } from 'recharts'
 import { Heart, Smile, Activity } from 'lucide-react'
 import MoodPicker from '../components/MoodPicker.jsx'
@@ -47,6 +47,7 @@ function LogTab({ uid }) {
     stress: null,
     symptoms: [],
     notes: '',
+    sleepHours: '',
   })
 
   const [form, setForm] = useState(emptyForm)
@@ -80,7 +81,6 @@ function LogTab({ uid }) {
   }
 
   const save = async () => {
-    if (form.mood === null) return
     setSaving(true)
     try {
       const data = {
@@ -92,6 +92,7 @@ function LogTab({ uid }) {
         stress: form.stress || null,
         symptoms: form.symptoms,
         notes: form.notes,
+        sleepHours: form.sleepHours ? parseFloat(form.sleepHours) : null,
       }
       if (editId) {
         await setEntry(uid, 'wellbeing', editId, data)
@@ -114,6 +115,7 @@ function LogTab({ uid }) {
       stress: entry.stress || null,
       symptoms: entry.symptoms || [],
       notes: entry.notes || '',
+      sleepHours: String(entry.sleepHours || ''),
     })
     setEditId(entry.id)
   }
@@ -187,13 +189,19 @@ function LogTab({ uid }) {
         </div>
 
         <div className="mb-4">
+          <label className="label">Sleep hours</label>
+          <input type="number" step="0.5" min="0" max="24" className="input" placeholder="e.g. 7.5"
+            value={form.sleepHours || ''} onChange={e => setForm(p => ({ ...p, sleepHours: e.target.value }))}/>
+        </div>
+
+        <div className="mb-4">
           <label className="label">Notes</label>
           <input type="text" className="input" placeholder="Optional notes"
             value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}/>
         </div>
 
         <div className="flex gap-2">
-          <button onClick={save} className="btn-primary" disabled={saving || form.mood === null}>
+          <button onClick={save} className="btn-primary" disabled={saving || (form.mood === null && form.energy === null && form.sleep === null && form.stress === null && form.symptoms.length === 0 && !form.notes)}>
             {saving ? 'Saving…' : editId ? 'Update' : 'Save'}
           </button>
           {editId && <button onClick={cancelEdit} className="btn-secondary">Cancel</button>}
@@ -217,6 +225,7 @@ function LogTab({ uid }) {
                 <TodChip tod={e.timeOfDay}/>
                 {e.mood && <span className="text-xs">Mood: {['😞','😐','🙂','😊','🤩'][e.mood - 1]}</span>}
                 {e.energy && <span className="text-xs text-muted">Energy: {e.energy}/5</span>}
+                {e.sleepHours && <span className="text-xs text-muted">Sleep: {e.sleepHours}h</span>}
               </div>
               {e.symptoms?.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-0.5">
@@ -237,6 +246,7 @@ function TrendsTab({ uid }) {
   const [entries, setEntries] = useState([])
   const [range, setRange] = useState(30)
   const [metric, setMetric] = useState('mood')
+  const [showAll, setShowAll] = useState(false)
 
   useEffect(() => subscribe(uid, 'wellbeing', setEntries, { limit: 200 }), [uid])
 
@@ -249,15 +259,36 @@ function TrendsTab({ uid }) {
   const METRICS = ['mood', 'energy', 'sleep', 'stress']
   const LABELS = { mood: 'Mood', energy: 'Energy', sleep: 'Sleep', stress: 'Stress' }
 
+  // V: Correlation insights
+  const highMoodDays = entries.filter(e => e.mood >= 4)
+  const lowMoodDays = entries.filter(e => e.mood <= 2)
+  const avgSleepHigh = highMoodDays.filter(e => e.sleepHours).length > 0
+    ? (highMoodDays.filter(e => e.sleepHours).reduce((a, e) => a + e.sleepHours, 0) / highMoodDays.filter(e => e.sleepHours).length).toFixed(1)
+    : null
+  const avgSleepLow = lowMoodDays.filter(e => e.sleepHours).length > 0
+    ? (lowMoodDays.filter(e => e.sleepHours).reduce((a, e) => a + e.sleepHours, 0) / lowMoodDays.filter(e => e.sleepHours).length).toFixed(1)
+    : null
+  const avgEnergyHighSleep = entries.filter(e => e.sleepHours >= 7 && e.energy).length > 0
+    ? (entries.filter(e => e.sleepHours >= 7 && e.energy).reduce((a, e) => a + e.energy, 0) / entries.filter(e => e.sleepHours >= 7 && e.energy).length).toFixed(1)
+    : null
+  const avgEnergyLowSleep = entries.filter(e => e.sleepHours < 7 && e.sleepHours > 0 && e.energy).length > 0
+    ? (entries.filter(e => e.sleepHours < 7 && e.sleepHours > 0 && e.energy).reduce((a, e) => a + e.energy, 0) / entries.filter(e => e.sleepHours < 7 && e.sleepHours > 0 && e.energy).length).toFixed(1)
+    : null
+  const insights = []
+  if (avgSleepHigh && avgSleepLow) insights.push(`On good mood days (4-5), avg sleep is ${avgSleepHigh}h vs ${avgSleepLow}h on low mood days`)
+  if (avgEnergyHighSleep && avgEnergyLowSleep) insights.push(`7+ hours sleep → avg energy ${avgEnergyHighSleep}/5 vs ${avgEnergyLowSleep}/5 on less sleep`)
+
   return (
     <div className="space-y-4">
       <div className="card">
         <div className="card-title">Wellbeing Trends</div>
         <div className="flex gap-2 mb-3 flex-wrap">
           {METRICS.map(m => (
-            <button key={m} onClick={() => setMetric(m)}
-              className={metric === m ? 'btn-primary text-xs' : 'btn-secondary text-xs'}>{LABELS[m]}</button>
+            <button key={m} onClick={() => { setMetric(m); setShowAll(false) }}
+              className={metric === m && !showAll ? 'btn-primary text-xs' : 'btn-secondary text-xs'}>{LABELS[m]}</button>
           ))}
+          <button onClick={() => setShowAll(a => !a)}
+            className={showAll ? 'btn-primary text-xs' : 'btn-secondary text-xs'}>All metrics</button>
         </div>
         <div className="flex gap-2 mb-3">
           {[30, 60, 90].map(d => (
@@ -265,7 +296,27 @@ function TrendsTab({ uid }) {
               className={range === d ? 'btn-primary text-xs' : 'btn-secondary text-xs'}>{d}d</button>
           ))}
         </div>
-        {sorted.length > 1 ? (
+        {showAll ? (
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={(() => {
+              const allDates = [...new Set(entries.map(e => e.date))].sort().slice(-range)
+              return allDates.map(date => {
+                const e = entries.find(x => x.date === date) || {}
+                return { date: date.slice(5), mood: e.mood || null, energy: e.energy || null, sleep: e.sleep || null, stress: e.stress || null }
+              })
+            })()}>
+              <CartesianGrid stroke="#334155" strokeDasharray="3 3"/>
+              <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd"/>
+              <YAxis domain={[1, 5]} ticks={[1,2,3,4,5]} tick={{ fill: '#94a3b8', fontSize: 10 }} width={20}/>
+              <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', color: '#f1f5f9' }}/>
+              <Legend wrapperStyle={{ fontSize: 10, color: '#94a3b8' }}/>
+              <Line type="monotone" dataKey="mood" stroke="#22d3ee" dot={false} strokeWidth={2} connectNulls name="Mood"/>
+              <Line type="monotone" dataKey="energy" stroke="#f59e0b" dot={false} strokeWidth={2} connectNulls name="Energy"/>
+              <Line type="monotone" dataKey="sleep" stroke="#10b981" dot={false} strokeWidth={2} connectNulls name="Sleep"/>
+              <Line type="monotone" dataKey="stress" stroke="#ef4444" dot={false} strokeWidth={2} connectNulls name="Stress"/>
+            </LineChart>
+          </ResponsiveContainer>
+        ) : sorted.length > 1 ? (
           <ResponsiveContainer width="100%" height={180}>
             <LineChart data={sorted}>
               <CartesianGrid stroke="#334155" strokeDasharray="3 3"/>
@@ -280,6 +331,21 @@ function TrendsTab({ uid }) {
           <p className="text-sm text-muted">Log at least 2 entries to see a trend.</p>
         )}
       </div>
+
+      {/* V: Correlation insights */}
+      {insights.length > 0 && (
+        <div className="card">
+          <div className="card-title">Insights</div>
+          <ul className="space-y-2">
+            {insights.map((insight, i) => (
+              <li key={i} className="text-sm text-muted flex items-start gap-2">
+                <span className="text-accent shrink-0">→</span> {insight}
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-muted mt-2">Based on your logged data. Log sleep hours for more insights.</p>
+        </div>
+      )}
 
       {/* Symptom timeline */}
       <div className="card">

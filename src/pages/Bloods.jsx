@@ -133,26 +133,37 @@ function LogTab({ uid, sex }) {
         <div className="card-title">History</div>
         {entries.length === 0 ? (
           <p className="text-sm text-muted">No blood results logged yet.</p>
-        ) : entries.map(e => (
-          <EditableRow key={e.id}
-            onEdit={() => startEdit(e)}
-            onDelete={() => deleteEntry(uid, 'bloods', e.id)}
-            className="mb-2 items-start"
-          >
-            <div>
-              <div className="text-sm font-medium mb-1">{e.date}</div>
-              <div className="flex flex-wrap gap-2">
-                {BLOOD_FIELDS.filter(f => e[f.key] !== undefined && e[f.key] !== null).map(f => (
-                  <div key={f.key} className="flex items-center gap-1 text-xs">
-                    <span className="text-muted">{f.label}:</span>
-                    <span className="text-text">{e[f.key]}</span>
-                    <FlagChip name={f.key} value={e[f.key]} sex={sex}/>
-                  </div>
-                ))}
+        ) : entries.map((e, idx) => {
+          const prev = entries[idx + 1] // entries sorted desc so next = older
+          return (
+            <EditableRow key={e.id}
+              onEdit={() => startEdit(e)}
+              onDelete={() => deleteEntry(uid, 'bloods', e.id)}
+              className="mb-2 items-start"
+            >
+              <div>
+                <div className="text-sm font-medium mb-1">{e.date}</div>
+                <div className="flex flex-wrap gap-2">
+                  {BLOOD_FIELDS.filter(f => e[f.key] !== undefined && e[f.key] !== null).map(f => {
+                    const delta = prev && prev[f.key] != null ? (parseFloat(e[f.key]) - parseFloat(prev[f.key])) : null
+                    return (
+                      <div key={f.key} className="flex items-center gap-1 text-xs">
+                        <span className="text-muted">{f.label}:</span>
+                        <span className="text-text">{e[f.key]}</span>
+                        <FlagChip name={f.key} value={e[f.key]} sex={sex}/>
+                        {delta !== null && Math.abs(delta) > 0.01 && (
+                          <span className={`text-[10px] ${delta < 0 ? 'text-success' : 'text-danger'}`}>
+                            {delta > 0 ? '↑' : '↓'}{Math.abs(delta).toFixed(1)}
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
-            </div>
-          </EditableRow>
-        ))}
+            </EditableRow>
+          )
+        })}
       </div>
     </div>
   )

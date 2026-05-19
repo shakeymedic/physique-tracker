@@ -293,7 +293,7 @@ export default function Insights() {
           <div className="card-title flex items-center gap-2">
             <Zap size={16} className="text-accent" /> Activity Consistency (90 days)
           </div>
-          <ConsistencyHeatmap entries={heatmapDates} days={90} />
+          <ConsistencyHeatmap entries={heatmapDates} days={90} gymGoal={gymGoal} />
           <div className="flex flex-wrap gap-3 mt-3 text-xs text-muted">
             {[
               { label: 'Gym', color: 'bg-accent' },

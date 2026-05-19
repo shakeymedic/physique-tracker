@@ -5,7 +5,9 @@ import { subscribe, addEntry, setEntry, getSettings, getAll } from '../data.js'
 import { format, subDays, startOfWeek } from 'date-fns'
 import { CheckSquare, Square, Apple, Trophy, Cloud, Dumbbell, Heart, Activity, Play } from 'lucide-react'
 import { quoteOfTheDay } from '../lib/quotes.js'
+import { computeAchievements } from '../lib/achievements.js'
 import { isMedDueToday, lastTakenDate } from '../clinical/meds.js'
+import { flag } from '../clinical/ranges.js'
 import { computeMuscleRecovery, muscleStatus } from '../training/exercises.js'
 import WeightChart, { computeWeeklyRate } from '../components/WeightChart.jsx'
 import MoodPicker from '../components/MoodPicker.jsx'
@@ -66,6 +68,7 @@ export default function Today() {
   const [dietBreaks, setDietBreaks] = useState({})
   const [wellbeing, setWellbeing] = useState([])
   const [selfCareLog, setSelfCareLog] = useState([])
+  const [latestBloods, setLatestBloods] = useState(null)
 
   // Quick weight log form
   const [wForm, setWForm] = useState({ date: today(), weight: '', bodyfat: '' })
@@ -99,6 +102,12 @@ export default function Today() {
     })
     getSettings(uid).then(s => {
       setSettings(s)
+    })
+    getAll(uid, 'bloods').then(docs => {
+      if (docs.length > 0) {
+        const sorted = docs.sort((a, b) => b.date.localeCompare(a.date))
+        setLatestBloods(sorted[0])
+      }
     })
     return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9() }
   }, [uid])
@@ -217,6 +226,19 @@ export default function Today() {
   const cardioGoal = actGoals.cardioPerWeek || 2
   const selfCareGoal = actGoals.selfCarePerWeek || 5
 
+  // A: Streak chips
+  const { streaks } = computeAchievements({ weights, lifts, cardio, nutritionLog: nutrition, medicationLog: medLogs, wellbeing, selfCareLog, mobilityLog: [], settings })
+
+  // B: Late-day training nudge
+  const hour = new Date().getHours()
+  const todayTrained = lifts.some(l => l.date === todayStr) || cardio.some(c => c.date === todayStr)
+  const showTrainingNudge = hour >= 19 && !todayTrained && gymGoal > 0 && weekGymDays < gymGoal
+
+  // L: Flagged blood values
+  const flaggedBloods = latestBloods ? Object.entries(latestBloods)
+    .filter(([k, v]) => v != null && typeof v === 'number' && flag(k, v, settings.profile?.sex || 'M') === 'bad')
+    .map(([k]) => k) : []
+
   // ── Today's mood ──
   const todayWellbeing = wellbeing.find(w => w.date === todayStr)
   const todayMood = todayWellbeing?.mood ?? null
@@ -312,6 +334,9 @@ export default function Today() {
               Cardio distance this week: <span className="text-text font-medium">{weekCardioKm.toFixed(1)} km</span>
             </p>
           )}
+          {streaks.gymWeeks.current > 1 && (
+            <p className="text-xs text-accent mt-1">🔥 {streaks.gymWeeks.current}-week gym streak</p>
+          )}
           <button onClick={() => navigate('/training')} className="btn-ghost text-xs mt-2">
             View training →
           </button>
@@ -327,6 +352,9 @@ export default function Today() {
               <span className="text-accent font-semibold text-lg">{todayWeight.weight} kg</span>
               {todayWeight.bodyfat && <span className="text-muted ml-2">· {todayWeight.bodyfat}% BF</span>}
               <span className="text-muted ml-2">logged today</span>
+              {streaks.weighIn.current > 1 && (
+                <span className="text-xs text-accent ml-2">🔥 {streaks.weighIn.current}-day weigh-in streak</span>
+              )}
             </div>
           ) : null}
           <form onSubmit={saveWeight} className="flex flex-wrap gap-2 items-end">
@@ -374,19 +402,26 @@ export default function Today() {
         <div className="card">
           <div className="card-title flex items-center gap-2">
             <Apple size={16} className="text-accent" /> Macros Today
+            {streaks.mealsLogged.current > 1 && (
+              <span className="text-xs text-success ml-auto">🔥 {streaks.mealsLogged.current}d streak</span>
+            )}
           </div>
           <div className="space-y-2 mb-3">
             {macros.map(m => {
-              const pct = m.target ? Math.min(100, (m.actual / m.target) * 100) : 0
-              const colour = pct > 105 ? 'bg-danger' : pct > 80 ? 'bg-success' : 'bg-accent'
+              const rawPct = m.target ? (m.actual / m.target) * 100 : 0
+              const displayPct = Math.min(100, rawPct)
+              const isOver = rawPct > 100
+              const colour = isOver ? 'bg-danger' : rawPct >= 90 ? 'bg-success' : 'bg-accent'
               return (
                 <div key={m.name}>
-                  <div className="flex justify-between text-xs text-muted mb-0.5">
-                    <span>{m.name}</span>
-                    <span>{m.actual} / {m.target}</span>
+                  <div className="flex justify-between text-xs mb-0.5">
+                    <span className="text-muted">{m.name}</span>
+                    <span className={isOver ? 'text-danger font-semibold' : 'text-muted'}>
+                      {m.actual} / {m.target}{isOver ? ` (+${Math.round(m.actual - m.target)} over)` : ''}
+                    </span>
                   </div>
                   <div className="w-full bg-surfaceAlt rounded-full h-1.5">
-                    <div className={`h-1.5 rounded-full transition-all ${colour}`} style={{ width: `${pct}%` }} />
+                    <div className={`h-1.5 rounded-full transition-all ${colour}`} style={{ width: `${displayPct}%` }} />
                   </div>
                 </div>
               )
@@ -444,8 +479,39 @@ export default function Today() {
                   </li>
                 )
               })}
+              {meds.filter(med => med.frequency === 'weekly' && !medsDueToday.find(m => m.id === med.id)).map(med => {
+                const lt = lastTakenDate(medLogs, med.id)
+                if (!lt) return null
+                const nextDate = new Date(lt)
+                nextDate.setDate(nextDate.getDate() + 7)
+                const daysUntil = Math.ceil((nextDate - new Date()) / 86400000)
+                if (daysUntil <= 0 || daysUntil > 7) return null
+                return (
+                  <li key={`next-${med.id}`} className="flex items-center gap-3 py-1 text-sm text-muted">
+                    <span className="text-accent text-xs">💊</span>
+                    <span>{med.name} {med.dose}{med.unit} — next dose in {daysUntil} day{daysUntil !== 1 ? 's' : ''}</span>
+                  </li>
+                )
+              })}
             </ul>
           )}
+        {meds.filter(m => m.frequency !== 'asNeeded').length > 0 && (() => {
+          const weekStart2 = format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+          const scheduledMeds = meds.filter(m => m.frequency !== 'asNeeded')
+          const takenThisWeek = medLogs.filter(l => l.date >= weekStart2 && !l.outOfSchedule && !l.stat)
+          const takenMedIds = new Set(takenThisWeek.map(l => l.medId))
+          const adherent = scheduledMeds.filter(m => takenMedIds.has(m.id)).length
+          const pct = Math.round((adherent / scheduledMeds.length) * 100)
+          return (
+            <div className="mt-2 pt-2 border-t border-border/20">
+              <p className="text-xs text-muted">
+                Meds this week: <span className={pct >= 90 ? 'text-success' : pct >= 70 ? 'text-warn' : 'text-danger'}>
+                  {adherent}/{scheduledMeds.length} taken ({pct}%)
+                </span>
+              </p>
+            </div>
+          )
+        })()}
         </div>
 
         {/* Muscle recovery summary */}
@@ -489,6 +555,31 @@ export default function Today() {
             {todayPRs.map(pr => (
               <span key={pr} className="chip-warn">🏆 {pr}</span>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Flagged blood results */}
+      {flaggedBloods.length > 0 && (
+        <div className="card border-danger/30 bg-danger/5">
+          <p className="text-xs text-danger flex items-center gap-2">
+            <span>⚠</span> Last bloods: {flaggedBloods.join(', ')} flagged — 
+            <button onClick={() => navigate('/bloods')} className="underline">view</button>
+          </p>
+        </div>
+      )}
+
+      {/* B: Late-day training nudge */}
+      {showTrainingNudge && (
+        <div className="card border-accent/20 bg-accent/5">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-text">No training logged yet today</p>
+              <p className="text-xs text-muted">{weekGymDays}/{gymGoal} sessions this week</p>
+            </div>
+            <button onClick={() => navigate('/training')} className="btn-primary text-xs flex items-center gap-1">
+              <Dumbbell size={12}/> Log session
+            </button>
           </div>
         </div>
       )}

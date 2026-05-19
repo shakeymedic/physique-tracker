@@ -242,6 +242,7 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
     timeOfDay: detectTimeOfDay(),
     exercises: [],   // { type:'strength'|'cardio', name, sets[], cardio:{...} }
     notes: '',
+    sessionRpe: null,
   })
 
   const [session, setSession] = useState(emptySession)
@@ -287,7 +288,7 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
   const addSet = (exIdx) => {
     const sf = getSetForm(exIdx)
     if (!sf.weight || !sf.reps) return
-    const newSet = { weight: parseFloat(sf.weight), reps: parseInt(sf.reps), rpe: parseFloat(sf.rpe) }
+    const newSet = { weight: parseFloat(sf.weight), reps: parseInt(sf.reps), rpe: parseFloat(sf.rpe), warmup: sf.warmup || false }
     setSession(prev => ({
       ...prev,
       exercises: prev.exercises.map((ex, i) =>
@@ -417,6 +418,7 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
         totalTonnage,
         totalCardioKcal: totalCardioKcal || null,
         notes: session.notes,
+        sessionRpe: session.sessionRpe || null,
         prs,
       }
 
@@ -684,7 +686,7 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                           <tbody>
                             {ex.sets.map((s, si) => (
                               <tr key={si} className="border-t border-border/20">
-                                <td className="py-1.5 text-muted text-xs">{si + 1}</td>
+                                <td className="py-1.5 text-muted text-xs">{si + 1}{s.warmup ? ' W' : ''}</td>
                                 <td className="py-1.5 font-medium">{s.weight}</td>
                                 <td className="py-1.5">{s.reps}</td>
                                 <td className="py-1.5 text-muted">{s.rpe}</td>
@@ -742,6 +744,12 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                           {RPE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
                         </select>
                       </div>
+                      <div className="flex flex-col items-center gap-1 shrink-0">
+                        <label className="label text-xs">W-up</label>
+                        <input type="checkbox" className="w-4 h-4 accent-accent"
+                          checked={sf.warmup || false}
+                          onChange={e => updateSetForm(exIdx, 'warmup', e.target.checked)}/>
+                      </div>
                       <button
                         onClick={() => addSet(exIdx)}
                         disabled={!sf.weight || !sf.reps}
@@ -778,6 +786,20 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
             <input type="text" className="input" placeholder="Optional"
               value={session.notes} onChange={e => setSession(p => ({ ...p, notes: e.target.value }))}/>
             <MicButton onTranscript={t => setSession(p => ({ ...p, notes: p.notes ? p.notes + ' ' + t : t }))}/>
+          </div>
+        </div>
+
+        {/* Session RPE */}
+        <div className="mb-3">
+          <label className="label">Session RPE <span className="text-muted">(overall feel, optional)</span></label>
+          <div className="flex gap-2 flex-wrap">
+            {[6, 7, 7.5, 8, 8.5, 9, 9.5, 10].map(r => (
+              <button key={r} type="button"
+                onClick={() => setSession(p => ({ ...p, sessionRpe: r }))}
+                className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${session.sessionRpe === r ? 'bg-accent text-bg border-accent' : 'bg-surfaceAlt text-muted border-border/30'}`}>
+                {r}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -2056,6 +2078,35 @@ function HistoryTab({ uid, onEditLift }) {
         ) : <p className="text-sm text-muted">Not enough data for this exercise.</p>}
       </div>
 
+      {(() => {
+        const prs = {}
+        lifts.forEach(l => {
+          ;(l.exercises || []).forEach(ex => {
+            ;(ex.sets || []).forEach(s => {
+              const e1 = epley(s.weight, s.reps)
+              if (!prs[ex.name] || e1 > prs[ex.name].e1rm) {
+                prs[ex.name] = { weight: s.weight, reps: s.reps, e1rm: e1 }
+              }
+            })
+          })
+        })
+        const prEntries = Object.entries(prs).sort((a, b) => b[1].e1rm - a[1].e1rm)
+        if (!prEntries.length) return null
+        return (
+          <div className="card">
+            <div className="card-title flex items-center gap-2"><Trophy size={16} className="text-warn"/> All-Time PRs</div>
+            <div className="space-y-1">
+              {prEntries.map(([name, pr]) => (
+                <div key={name} className="flex items-center justify-between text-sm py-1 border-b border-border/20 last:border-0">
+                  <span className="text-text font-medium">{name}</span>
+                  <span className="text-muted text-xs">{pr.weight} kg × {pr.reps} — e1RM <span className="text-accent font-semibold">{pr.e1rm.toFixed(1)}</span></span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
       <div className="card">
         <div className="card-title">All Sessions</div>
         <select className="input mb-3" value={filter} onChange={e => setFilter(e.target.value)}>
@@ -2065,12 +2116,29 @@ function HistoryTab({ uid, onEditLift }) {
 
         {filter
           ? filteredLifts.map(l => <LiftRow key={l.id} lift={l} uid={uid} onEdit={onEditLift} expanded={expanded} setExpanded={setExpanded}/>)
-          : allItems.map(item => item._type === 'lift'
-            ? <LiftRow key={item.id} lift={item} uid={uid} onEdit={onEditLift} expanded={expanded} setExpanded={setExpanded}/>
-            : <CardioHistoryRow key={item.id} entry={item} uid={uid}/>
-          )
+          : (() => {
+            if (allItems.length === 0) return <p className="text-sm text-muted">No sessions yet.</p>
+            const grouped = {}
+            allItems.forEach(item => {
+              const month = item.date.slice(0, 7)
+              if (!grouped[month]) grouped[month] = []
+              grouped[month].push(item)
+            })
+            const months = Object.keys(grouped).sort().reverse()
+            return months.map(month => (
+              <div key={month} className="mb-4">
+                <div className="text-xs font-semibold text-muted uppercase tracking-wide mb-2 flex items-center gap-2">
+                  <span>{format(new Date(month + '-02'), 'MMMM yyyy')}</span>
+                  <span className="text-muted/50">— {grouped[month].length} session{grouped[month].length !== 1 ? 's' : ''}</span>
+                </div>
+                {grouped[month].map(item => item._type === 'lift'
+                  ? <LiftRow key={item.id} lift={item} uid={uid} onEdit={onEditLift} expanded={expanded} setExpanded={setExpanded}/>
+                  : <CardioHistoryRow key={item.id} entry={item} uid={uid}/>
+                )}
+              </div>
+            ))
+          })()
         }
-        {allItems.length === 0 && <p className="text-sm text-muted">No sessions yet.</p>}
       </div>
     </div>
   )

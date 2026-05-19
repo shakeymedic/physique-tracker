@@ -285,7 +285,7 @@ export default function Medications() {
                   <div className="card-title">Daily medications — today</div>
                   <MedList meds={daily} uid={uid} isTakenToday={isTakenToday}
                     markTaken={markTaken} startEdit={startEdit}
-                    onCatchup={setCatchupForMed}/>
+                    onCatchup={setCatchupForMed} logs={logs}/>
                 </div>
               )}
 
@@ -296,7 +296,7 @@ export default function Medications() {
                   </div>
                   <MedList meds={dueToday} uid={uid} isTakenToday={isTakenToday}
                     markTaken={markTaken} startEdit={startEdit} variant="due"
-                    onCatchup={setCatchupForMed}/>
+                    onCatchup={setCatchupForMed} logs={logs}/>
                 </div>
               )}
 
@@ -348,7 +348,7 @@ function frequencyDescription(med) {
   return med.frequency
 }
 
-function MedList({ meds, uid, isTakenToday, markTaken, startEdit, variant, onCatchup }) {
+function MedList({ meds, uid, isTakenToday, markTaken, startEdit, variant, onCatchup, logs = [] }) {
   return (
     <div className="space-y-2">
       {meds.map(med => {
@@ -367,6 +367,16 @@ function MedList({ meds, uid, isTakenToday, markTaken, startEdit, variant, onCat
                 <div className="text-xs text-muted">
                   {med.dose} {med.unit} · {frequencyDescription(med)} · {med.timeOfDay}
                 </div>
+                {(() => {
+                  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 30)
+                  const cutoffStr = cutoff.toISOString().slice(0, 10)
+                  const taken30 = logs ? logs.filter(l => l.medId === med.id && !l.outOfSchedule && l.date >= cutoffStr).length : 0
+                  const scheduled = med.frequency === 'daily' ? 30 : med.frequency === 'weekly' ? 4 : 0
+                  if (!scheduled) return null
+                  const pct = Math.round((taken30 / scheduled) * 100)
+                  const cls = pct >= 90 ? 'chip-ok' : pct >= 70 ? 'chip-warn' : 'chip-bad'
+                  return <span className={`${cls} text-xs mt-1 inline-block`}>{pct}% adherence</span>
+                })()}
               </div>
             </div>
             <div className="flex items-center gap-1">
