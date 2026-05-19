@@ -258,21 +258,23 @@ function AddExercisePicker({ uid, onAdd }) {
   )
 }
 
-// ── Log (multi-exercise session) ──────────────────────────────────────────────
+// ── Log (multi-exercise + cardio-block session) ───────────────────────────────
 function LogTab({ uid, initialEditLift, onEditStart }) {
   const DRAFT_KEY = `pt-draft-training-${uid}`
 
   const emptySession = () => ({
     date: today(),
     timeOfDay: detectTimeOfDay(),
-    exercises: [],
+    exercises: [],   // { type:'strength'|'cardio', name, sets[], cardio:{...} }
     notes: '',
   })
 
   const [session, setSession] = useState(emptySession)
-  const [setForm, setSetForm] = useState({ weight: '', reps: '', rpe: '7' })
+  // Per-exercise set forms keyed by exIdx
+  const [setForms, setSetForms] = useState({})
   const [activeExIdx, setActiveExIdx] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [savedSummary, setSavedSummary] = useState(null)
   const [editId, setEditId] = useState(null)
   const [liftsAll, setLiftsAll] = useState([])
   const [templates, setTemplates] = useState([])
@@ -283,11 +285,8 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
   useEffect(() => {
     getAll(uid, 'workoutTemplates').then(setTemplates)
     getAll(uid, 'lifts').then(data => setLiftsAll(data.map(normaliseLift)))
-
     const draft = loadDraft(DRAFT_KEY)
-    if (draft && draft.data?.exercises?.length) {
-      setDraftPrompt(draft)
-    }
+    if (draft && draft.data?.exercises?.length) setDraftPrompt(draft)
   }, [uid])
 
   const pendingEditRef = useRef(initialEditLift)
@@ -298,89 +297,148 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
   }, [DRAFT_KEY])
 
   useEffect(() => {
-    if (session.exercises.length > 0) {
-      debouncedSaveDraft(session)
-    }
+    if (session.exercises.length > 0) debouncedSaveDraft(session)
   }, [session, debouncedSaveDraft])
 
   const restoreDraft = () => {
-    if (draftPrompt?.data) {
-      setSession(draftPrompt.data)
-      setDraftPrompt(null)
-    }
+    if (draftPrompt?.data) { setSession(draftPrompt.data); setDraftPrompt(null) }
   }
 
-  const addExercise = (name) => {
+  // Get the set form for a given exercise index (default blank)
+  const getSetForm = (idx) => setForms[idx] || { weight: '', reps: '', rpe: '7' }
+  const updateSetForm = (idx, field, val) => setSetForms(prev => ({
+    ...prev, [idx]: { ...getSetForm(idx), [field]: val }
+  }))
+
+  // Carry forward last set's weight/reps as default for next set
+  const prefillSetForm = (idx, ex) => {
+    if (ex.sets.length === 0) return
+    const last = ex.sets[ex.sets.length - 1]
+    setSetForms(prev => ({
+      ...prev,
+      [idx]: { weight: String(last.weight), reps: String(last.reps), rpe: String(last.rpe || 7) }
+    }))
+  }
+
+  const addStrengthExercise = (name) => {
+    const newIdx = session.exercises.length
     setSession(prev => ({
       ...prev,
-      exercises: [...prev.exercises, { name, sets: [] }],
+      exercises: [...prev.exercises, { type: 'strength', name, sets: [] }],
     }))
-    setActiveExIdx(session.exercises.length)
+    setActiveExIdx(newIdx)
+  }
+
+  const addCardioBlock = () => {
+    const newIdx = session.exercises.length
+    setSession(prev => ({
+      ...prev,
+      exercises: [...prev.exercises, {
+        type: 'cardio',
+        name: 'Running',
+        cardio: { type: 'Running', durationMin: '', distanceKm: '', kcal: '', avgHr: '', rpe: '' }
+      }],
+    }))
+    setActiveExIdx(newIdx)
   }
 
   const removeExercise = (idx) => {
-    setSession(prev => ({
-      ...prev,
-      exercises: prev.exercises.filter((_, i) => i !== idx),
-    }))
+    setSession(prev => ({ ...prev, exercises: prev.exercises.filter((_, i) => i !== idx) }))
+    setSetForms(prev => { const n = { ...prev }; delete n[idx]; return n })
     if (activeExIdx === idx) setActiveExIdx(null)
   }
 
   const addSet = (exIdx) => {
-    if (!setForm.weight || !setForm.reps) return
-    const newSet = { weight: parseFloat(setForm.weight), reps: parseInt(setForm.reps), rpe: parseFloat(setForm.rpe) }
+    const sf = getSetForm(exIdx)
+    if (!sf.weight || !sf.reps) return
+    const newSet = { weight: parseFloat(sf.weight), reps: parseInt(sf.reps), rpe: parseFloat(sf.rpe) }
     setSession(prev => {
       const exercises = prev.exercises.map((ex, i) =>
         i === exIdx ? { ...ex, sets: [...ex.sets, newSet] } : ex
       )
       return { ...prev, exercises }
     })
-    setSetForm(prev => ({ ...prev, weight: '', reps: '' }))
+    // Carry forward weight, clear reps
+    setSetForms(prev => ({ ...prev, [exIdx]: { ...sf, reps: '' } }))
   }
 
   const removeSet = (exIdx, setIdx) => {
-    setSession(prev => {
-      const exercises = prev.exercises.map((ex, i) =>
+    setSession(prev => ({
+      ...prev,
+      exercises: prev.exercises.map((ex, i) =>
         i === exIdx ? { ...ex, sets: ex.sets.filter((_, j) => j !== setIdx) } : ex
-      )
-      return { ...prev, exercises }
+      ),
+    }))
+  }
+
+  const updateCardioBlock = (exIdx, field, val) => {
+    setSession(prev => ({
+      ...prev,
+      exercises: prev.exercises.map((ex, i) =>
+        i === exIdx ? { ...ex, name: field === 'type' ? val : ex.name, cardio: { ...ex.cardio, [field]: val, ...(field === 'type' ? { type: val } : {}) } } : ex
+      ),
+    }))
+  }
+
+  // Get previous best for an exercise from history
+  const getPrevBest = (exerciseName) => {
+    let best = null
+    liftsAll.forEach(l => {
+      ;(l.exercises || []).filter(e => e.name === exerciseName).forEach(e => {
+        ;(e.sets || []).forEach(s => {
+          const e1 = epley(s.weight, s.reps)
+          if (!best || e1 > best.e1rm) {
+            best = { weight: s.weight, reps: s.reps, rpe: s.rpe, e1rm: e1, date: l.date }
+          }
+        })
+      })
     })
+    return best
   }
 
   const saveSession = async () => {
-    if (!session.exercises.some(ex => ex.sets.length > 0)) return
+    const hasStrength = session.exercises.some(ex => ex.type === 'strength' && ex.sets.length > 0)
+    const hasCardio = session.exercises.some(ex => ex.type === 'cardio' && ex.cardio?.durationMin)
+    if (!hasStrength && !hasCardio) return
     setSaving(true)
     try {
       const prs = []
-      session.exercises.forEach(ex => {
+      session.exercises.filter(ex => ex.type === 'strength').forEach(ex => {
         if (!ex.sets.length) return
         const newBest = Math.max(...ex.sets.map(s => epley(s.weight, s.reps)))
         let allTimeBest = 0
         liftsAll.forEach(l => {
           ;(l.exercises || []).filter(e => e.name === ex.name).forEach(e => {
-            ;(e.sets || []).forEach(s => {
-              const e1 = epley(s.weight, s.reps)
-              if (e1 > allTimeBest) allTimeBest = e1
-            })
+            ;(e.sets || []).forEach(s => { const e1 = epley(s.weight, s.reps); if (e1 > allTimeBest) allTimeBest = e1 })
           })
         })
         if (newBest > allTimeBest && allTimeBest > 0) prs.push(ex.name)
       })
 
-      const totalTonnage = session.exercises.reduce((acc, ex) =>
-        acc + ex.sets.reduce((a, s) => a + s.weight * s.reps, 0), 0
-      )
+      const totalTonnage = session.exercises
+        .filter(ex => ex.type === 'strength')
+        .reduce((acc, ex) => acc + ex.sets.reduce((a, s) => a + s.weight * s.reps, 0), 0)
+
+      const totalCardioKcal = session.exercises
+        .filter(ex => ex.type === 'cardio')
+        .reduce((acc, ex) => acc + (parseFloat(ex.cardio?.kcal) || 0), 0)
 
       const docData = {
         date: session.date,
         timeOfDay: session.timeOfDay || null,
-        exercises: session.exercises.map(ex => ({
-          name: ex.name,
-          sets: ex.sets,
-          e1RM: ex.sets.length ? Math.max(...ex.sets.map(s => epley(s.weight, s.reps))) : 0,
-          tonnage: ex.sets.reduce((a, s) => a + s.weight * s.reps, 0),
-        })),
+        exercises: session.exercises
+          .filter(ex => ex.type === 'strength' && ex.sets.length > 0)
+          .map(ex => ({
+            name: ex.name,
+            sets: ex.sets,
+            e1RM: Math.max(...ex.sets.map(s => epley(s.weight, s.reps))),
+            tonnage: ex.sets.reduce((a, s) => a + s.weight * s.reps, 0),
+          })),
+        cardioBlocks: session.exercises
+          .filter(ex => ex.type === 'cardio' && ex.cardio?.durationMin)
+          .map(ex => ({ ...ex.cardio })),
         totalTonnage,
+        totalCardioKcal: totalCardioKcal || null,
         notes: session.notes,
         prs,
       }
@@ -392,30 +450,41 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
         await addEntry(uid, 'lifts', docData)
       }
 
+      // Build summary for post-save panel
+      const strengthExes = session.exercises.filter(ex => ex.type === 'strength' && ex.sets.length > 0)
+      const cardioBlocks = session.exercises.filter(ex => ex.type === 'cardio' && ex.cardio?.durationMin)
+      setSavedSummary({
+        exercises: strengthExes,
+        cardioBlocks,
+        totalTonnage,
+        totalCardioKcal,
+        prs,
+        date: session.date,
+      })
+
       clearDraft(DRAFT_KEY)
       setSession(emptySession())
+      setSetForms({})
       setActiveExIdx(null)
-
-      if (prs.length) {
-        alert(`\uD83C\uDFC6 New PRs: ${prs.join(', ')}!`)
-      }
     } finally { setSaving(false) }
   }
 
   const loadTemplate = (t) => {
     if (t.exercises) {
-      setSession(prev => ({ ...prev, exercises: t.exercises.map(ex => ({ name: ex.name, sets: ex.sets || [] })) }))
+      setSession(prev => ({ ...prev, exercises: t.exercises.map(ex => ({ type: 'strength', name: ex.name, sets: ex.sets || [] })) }))
     } else if (t.exercise) {
-      setSession(prev => ({ ...prev, exercises: [{ name: t.exercise, sets: t.sets || [] }] }))
+      setSession(prev => ({ ...prev, exercises: [{ type: 'strength', name: t.exercise, sets: t.sets || [] }] }))
     }
   }
 
   const startEdit = (lift) => {
     const norm = normaliseLift(lift)
+    const exercises = norm.exercises.map(ex => ({ type: 'strength', name: ex.name, sets: ex.sets || [] }))
+    const cardioBlocks = (norm.cardioBlocks || []).map(c => ({ type: 'cardio', name: c.type || 'Running', cardio: c }))
     setSession({
       date: norm.date,
       timeOfDay: norm.timeOfDay || null,
-      exercises: norm.exercises,
+      exercises: [...exercises, ...cardioBlocks],
       notes: norm.notes || '',
     })
     setEditId(lift.id)
@@ -430,9 +499,80 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialEditLift])
 
-  const cancelEdit = () => {
-    setEditId(null)
-    setSession(emptySession())
+  const cancelEdit = () => { setEditId(null); setSession(emptySession()); setSetForms({}) }
+
+  // Session summary after save
+  if (savedSummary) {
+    return (
+      <div className="space-y-4">
+        <div className="card border-success/30 bg-success/5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="card-title flex items-center gap-2 text-success">
+              <CheckCircle size={18}/> Session saved
+            </div>
+            <span className="text-xs text-muted">{savedSummary.date}</span>
+          </div>
+
+          {savedSummary.prs.length > 0 && (
+            <div className="bg-warn/10 border border-warn/20 rounded-xl px-3 py-2 mb-3 flex items-center gap-2">
+              <Trophy size={14} className="text-warn shrink-0"/>
+              <span className="text-sm font-semibold text-warn">New PRs: {savedSummary.prs.join(', ')}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            {savedSummary.totalTonnage > 0 && (
+              <div className="bg-bg rounded-xl p-3">
+                <div className="text-xs text-muted mb-1">Total tonnage</div>
+                <div className="text-accent font-bold text-lg">{savedSummary.totalTonnage.toFixed(0)} kg</div>
+              </div>
+            )}
+            {savedSummary.exercises.length > 0 && (
+              <div className="bg-bg rounded-xl p-3">
+                <div className="text-xs text-muted mb-1">Exercises</div>
+                <div className="text-text font-bold text-lg">{savedSummary.exercises.length}</div>
+              </div>
+            )}
+            {savedSummary.totalCardioKcal > 0 && (
+              <div className="bg-bg rounded-xl p-3">
+                <div className="text-xs text-muted mb-1">Cardio kcal burned</div>
+                <div className="text-accent font-bold text-lg">{savedSummary.totalCardioKcal} kcal</div>
+              </div>
+            )}
+          </div>
+
+          {savedSummary.exercises.length > 0 && (
+            <div className="space-y-1 mb-3">
+              {savedSummary.exercises.map((ex, i) => {
+                const bestE1rm = Math.max(...ex.sets.map(s => epley(s.weight, s.reps))).toFixed(1)
+                const tonnage = ex.sets.reduce((a, s) => a + s.weight * s.reps, 0)
+                return (
+                  <div key={i} className="flex items-center justify-between text-sm bg-bg rounded-lg px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <Dumbbell size={12} className="text-accent shrink-0"/>
+                      <span className="font-medium text-text">{ex.name}</span>
+                      {savedSummary.prs.includes(ex.name) && <Trophy size={11} className="text-warn"/>}
+                    </div>
+                    <span className="text-xs text-muted">{ex.sets.length} sets · {tonnage.toFixed(0)} kg · e1RM {bestE1rm}</span>
+                  </div>
+                )
+              })}
+              {savedSummary.cardioBlocks.map((cb, i) => (
+                <div key={`c${i}`} className="flex items-center justify-between text-sm bg-bg rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <HeartPulse size={12} className="text-success shrink-0"/>
+                    <span className="font-medium text-text">{cb.cardio?.type || 'Cardio'}</span>
+                  </div>
+                  <span className="text-xs text-muted">{cb.cardio?.durationMin} min{cb.cardio?.kcal ? ` · ${cb.cardio.kcal} kcal` : ''}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <button onClick={() => setSavedSummary(null)} className="btn-primary text-sm">Log another session</button>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -480,31 +620,95 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
           </div>
         </div>
 
+        {/* Exercise / cardio blocks */}
         {session.exercises.map((ex, exIdx) => {
+          const isOpen = activeExIdx === exIdx
+          const sf = getSetForm(exIdx)
+
+          if (ex.type === 'cardio') {
+            const cb = ex.cardio || {}
+            return (
+              <div key={exIdx} className="bg-bg rounded-xl mb-3 overflow-hidden border border-border/30">
+                <div className="flex items-center justify-between px-3 py-2 bg-success/10">
+                  <button
+                    className="flex items-center gap-2 text-sm font-medium text-text flex-1 text-left"
+                    onClick={() => setActiveExIdx(isOpen ? null : exIdx)}
+                  >
+                    <HeartPulse size={14} className="text-success shrink-0"/>
+                    <span className="text-success font-semibold">{cb.type || 'Cardio'}</span>
+                    {cb.durationMin && <span className="text-xs text-muted ml-2">{cb.durationMin} min{cb.kcal ? ` · ${cb.kcal} kcal` : ''}</span>}
+                  </button>
+                  <button onClick={() => removeExercise(exIdx)} className="btn-ghost p-1 text-danger"><X size={14}/></button>
+                </div>
+                {isOpen && (
+                  <div className="px-3 py-2 grid grid-cols-2 md:grid-cols-3 gap-2">
+                    <div className="col-span-2 md:col-span-3">
+                      <label className="label text-xs">Type</label>
+                      <select className="input text-sm" value={cb.type || 'Running'} onChange={e => updateCardioBlock(exIdx, 'type', e.target.value)}>
+                        {CARDIO_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label text-xs">Duration (min) *</label>
+                      <input type="number" className="input text-sm" placeholder="30" value={cb.durationMin || ''} onChange={e => updateCardioBlock(exIdx, 'durationMin', e.target.value)}/>
+                    </div>
+                    <div>
+                      <label className="label text-xs">Distance (km)</label>
+                      <input type="number" step="0.01" className="input text-sm" placeholder="optional" value={cb.distanceKm || ''} onChange={e => updateCardioBlock(exIdx, 'distanceKm', e.target.value)}/>
+                    </div>
+                    <div>
+                      <label className="label text-xs">Kcal burned</label>
+                      <input type="number" className="input text-sm" placeholder="optional" value={cb.kcal || ''} onChange={e => updateCardioBlock(exIdx, 'kcal', e.target.value)}/>
+                    </div>
+                    <div>
+                      <label className="label text-xs">Avg HR</label>
+                      <input type="number" className="input text-sm" placeholder="optional" value={cb.avgHr || ''} onChange={e => updateCardioBlock(exIdx, 'avgHr', e.target.value)}/>
+                    </div>
+                    <div>
+                      <label className="label text-xs">RPE</label>
+                      <input type="number" min="1" max="10" step="0.5" className="input text-sm" placeholder="optional" value={cb.rpe || ''} onChange={e => updateCardioBlock(exIdx, 'rpe', e.target.value)}/>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          }
+
+          // Strength block
           const bestE1rm = ex.sets.length ? Math.max(...ex.sets.map(s => epley(s.weight, s.reps))).toFixed(1) : null
           const tonnage = ex.sets.reduce((a, s) => a + s.weight * s.reps, 0)
-          const isOpen = activeExIdx === exIdx
+          const prevBest = getPrevBest(ex.name)
 
           return (
             <div key={exIdx} className="bg-bg rounded-xl mb-3 overflow-hidden border border-border/30">
+              {/* Header — always visible, shows exercise name + summary */}
               <div className="flex items-center justify-between px-3 py-2 bg-surfaceAlt">
                 <button
-                  className="flex items-center gap-2 text-sm font-medium text-text flex-1 text-left"
+                  className="flex items-center gap-2 text-sm font-medium text-text flex-1 text-left min-w-0"
                   onClick={() => setActiveExIdx(isOpen ? null : exIdx)}
                 >
                   <Dumbbell size={14} className="text-accent shrink-0"/>
-                  {ex.name}
-                  {ex.sets.length > 0 && (
-                    <span className="text-xs text-muted ml-2">{ex.sets.length} sets · {tonnage.toFixed(0)} kg</span>
-                  )}
+                  <span className="truncate font-semibold">{ex.name}</span>
+                  <span className="text-xs text-muted shrink-0 ml-1">
+                    {ex.sets.length > 0
+                      ? `${ex.sets.length} sets · ${tonnage.toFixed(0)} kg · e1RM ${bestE1rm}`
+                      : 'tap to add sets'}
+                  </span>
                 </button>
-                <button onClick={() => removeExercise(exIdx)} className="btn-ghost p-1 text-danger">
-                  <X size={14}/>
-                </button>
+                <button onClick={() => removeExercise(exIdx)} className="btn-ghost p-1 text-danger shrink-0"><X size={14}/></button>
               </div>
 
               {isOpen && (
                 <div className="px-3 py-2">
+                  {/* Previous best hint */}
+                  {prevBest && (
+                    <div className="text-xs text-muted bg-surfaceAlt/50 rounded-lg px-2 py-1.5 mb-2 flex items-center gap-1">
+                      <Trophy size={11} className="text-warn shrink-0"/>
+                      Previous best: <span className="text-text font-medium ml-1">{prevBest.weight} kg × {prevBest.reps} @ RPE {prevBest.rpe || '?'}</span>
+                      <span className="ml-1">(e1RM {prevBest.e1rm.toFixed(1)}, {prevBest.date})</span>
+                    </div>
+                  )}
+
                   {ex.sets.length > 0 && (
                     <div className="space-y-1 mb-3">
                       <div className="grid grid-cols-5 text-xs text-muted px-1 mb-1">
@@ -518,9 +722,7 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                           <span>{s.rpe}</span>
                           <div className="flex items-center gap-1">
                             <span className="text-accent">{epley(s.weight, s.reps).toFixed(1)}</span>
-                            <button onClick={() => removeSet(exIdx, si)} className="btn-ghost p-0.5 ml-1">
-                              <Trash2 size={11}/>
-                            </button>
+                            <button onClick={() => removeSet(exIdx, si)} className="btn-ghost p-0.5 ml-1"><Trash2 size={11}/></button>
                           </div>
                         </div>
                       ))}
@@ -537,24 +739,31 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                     <div>
                       <label className="label text-xs">Weight (kg)</label>
                       <input type="number" step="0.5" min="0" className="input text-sm" placeholder="kg"
-                        value={setForm.weight} onChange={e => setSetForm(p => ({ ...p, weight: e.target.value }))}/>
+                        value={sf.weight} onChange={e => updateSetForm(exIdx, 'weight', e.target.value)}/>
                     </div>
                     <div>
                       <label className="label text-xs">Reps</label>
                       <input type="number" min="1" max="100" className="input text-sm" placeholder="reps"
-                        value={setForm.reps} onChange={e => setSetForm(p => ({ ...p, reps: e.target.value }))}/>
+                        value={sf.reps} onChange={e => updateSetForm(exIdx, 'reps', e.target.value)}/>
                     </div>
                     <div>
                       <label className="label text-xs">RPE</label>
-                      <select className="input text-sm" value={setForm.rpe}
-                        onChange={e => setSetForm(p => ({ ...p, rpe: e.target.value }))}>
+                      <select className="input text-sm" value={sf.rpe}
+                        onChange={e => updateSetForm(exIdx, 'rpe', e.target.value)}>
                         {RPE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
                       </select>
                     </div>
                   </div>
-                  <button onClick={() => addSet(exIdx)} className="btn-secondary text-xs mb-2">
-                    <Plus size={12}/> Add Set
-                  </button>
+                  <div className="flex gap-2 mb-2">
+                    <button onClick={() => addSet(exIdx)} className="btn-secondary text-xs">
+                      <Plus size={12}/> Add Set
+                    </button>
+                    {ex.sets.length > 0 && (
+                      <button onClick={() => prefillSetForm(exIdx, ex)} className="btn-ghost text-xs text-muted">
+                        Repeat last
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -562,7 +771,15 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
         })}
 
         {/* Add exercise picker */}
-        <AddExercisePicker uid={uid} onAdd={addExercise}/>
+        <AddExercisePicker uid={uid} onAdd={addStrengthExercise}/>
+
+        {/* Add cardio block button */}
+        <button
+          onClick={addCardioBlock}
+          className="btn-secondary text-xs flex items-center gap-1 mt-2 w-full justify-center"
+        >
+          <HeartPulse size={13}/> Add cardio block
+        </button>
 
         {/* Notes */}
         <div className="mt-3 mb-3">
@@ -576,8 +793,8 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
 
         <div className="flex gap-2 flex-wrap">
           <button onClick={saveSession} className="btn-primary"
-            disabled={saving || !session.exercises.some(ex => ex.sets.length > 0)}>
-            {saving ? 'Saving…' : editId ? 'Update Session' : 'Save Session'}
+            disabled={saving || (!session.exercises.some(ex => ex.type === 'strength' && ex.sets.length > 0) && !session.exercises.some(ex => ex.type === 'cardio' && ex.cardio?.durationMin))}>
+            {saving ? 'Saving...' : editId ? 'Update Session' : 'Save Session'}
           </button>
           {session.exercises.length > 0 && (
             <SaveTemplateButton uid={uid} session={session}/>
@@ -599,7 +816,7 @@ function SaveTemplateButton({ uid, session }) {
     try {
       await addEntry(uid, 'workoutTemplates', {
         name,
-        exercises: session.exercises.map(ex => ({ name: ex.name, sets: ex.sets })),
+        exercises: session.exercises.filter(ex => ex.type === 'strength').map(ex => ({ name: ex.name, sets: ex.sets })),
       })
       setName(''); setOpen(false)
     } finally { setSaving(false) }
@@ -614,6 +831,7 @@ function SaveTemplateButton({ uid, session }) {
     </div>
   )
 }
+
 
 // ── Cardio Tab ────────────────────────────────────────────────────────────────
 function CardioTab({ uid }) {
@@ -2009,7 +2227,22 @@ function TimerTab() {
   )
 }
 
-// ── Recovery (Muscle Heatmap) ──────────────────────────────────────────────────
+// ── Recovery (Muscle Heatmap + Weekly Volume) ──────────────────────────
+// Evidence-based weekly volume targets per muscle group (sets/week)
+const VOLUME_TARGETS = {
+  Chest:       { min: 10, target: 16 },
+  Back:        { min: 10, target: 18 },
+  Shoulders:   { min: 8,  target: 14 },
+  Biceps:      { min: 8,  target: 14 },
+  Triceps:     { min: 8,  target: 14 },
+  Forearms:    { min: 4,  target: 8  },
+  Quads:       { min: 8,  target: 16 },
+  Hamstrings:  { min: 6,  target: 12 },
+  Glutes:      { min: 6,  target: 12 },
+  Calves:      { min: 8,  target: 14 },
+  Core:        { min: 6,  target: 10 },
+}
+
 function RecoveryTab({ uid }) {
   const { all: allExercises } = useExerciseList(uid)
   const [lifts, setLifts] = useState([])
@@ -2024,6 +2257,22 @@ function RecoveryTab({ uid }) {
   const todayStr = format(new Date(), 'yyyy-MM-dd')
   const recovery = computeMuscleRecovery(lifts, todayStr, cardio, allExercises)
 
+  // Weekly volume: sets per muscle group since Mon this week
+  const weekStart = format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+  const weeklyVolume = {}
+  MUSCLE_REGIONS.forEach(m => { weeklyVolume[m] = 0 })
+
+  lifts.filter(l => l.date >= weekStart).forEach(lift => {
+    ;(lift.exercises || []).forEach(ex => {
+      const exDef = allExercises.find(e => e.name === ex.name)
+      const primaryMuscles = exDef?.primary || []
+      const secondaryMuscles = exDef?.secondary || []
+      const setCount = (ex.sets || []).length
+      primaryMuscles.forEach(m => { if (weeklyVolume[m] !== undefined) weeklyVolume[m] += setCount })
+      secondaryMuscles.forEach(m => { if (weeklyVolume[m] !== undefined) weeklyVolume[m] += Math.ceil(setCount * 0.5) })
+    })
+  })
+
   return (
     <div className="space-y-4">
       <div className="card">
@@ -2031,11 +2280,11 @@ function RecoveryTab({ uid }) {
           <Trophy size={16} className="text-accent"/> Muscle Recovery Heatmap
         </div>
         <p className="text-xs text-muted mb-3">
-          <span className="text-danger">■</span> Fatigued (today)
-          <span className="ml-2 text-warn">■</span> 1d
-          <span className="ml-2 text-yellow-400">■</span> 2d
-          <span className="ml-2 text-success">■</span> Recovered (3-5d)
-          <span className="ml-2 text-muted">■</span> Undertrained / no data
+          <span className="text-danger">&#9632;</span> Fatigued (today)
+          <span className="ml-2 text-warn">&#9632;</span> 1d
+          <span className="ml-2 text-yellow-400">&#9632;</span> 2d
+          <span className="ml-2 text-success">&#9632;</span> Recovered (3-5d)
+          <span className="ml-2 text-muted">&#9632;</span> Undertrained / no data
         </p>
         <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
           {MUSCLE_REGIONS.map(muscle => {
@@ -2053,6 +2302,49 @@ function RecoveryTab({ uid }) {
             )
           })}
         </div>
+      </div>
+
+      {/* Weekly volume tracker */}
+      <div className="card">
+        <div className="card-title flex items-center gap-2">
+          <Activity size={16} className="text-accent"/> Weekly Volume
+        </div>
+        <p className="text-xs text-muted mb-3">
+          Sets per muscle this week vs evidence-based targets. Secondary muscles counted at 0.5x.
+        </p>
+        <div className="space-y-2">
+          {MUSCLE_REGIONS.map(muscle => {
+            const sets = weeklyVolume[muscle] || 0
+            const tgt = VOLUME_TARGETS[muscle]
+            if (!tgt) return null
+            const pct = Math.min(100, (sets / tgt.target) * 100)
+            const isOver = sets >= tgt.target
+            const isAboveMin = sets >= tgt.min && sets < tgt.target
+            const colour = isOver ? 'bg-success' : isAboveMin ? 'bg-accent' : sets > 0 ? 'bg-warn' : 'bg-surfaceAlt/50'
+            return (
+              <div key={muscle}>
+                <div className="flex items-center justify-between text-xs mb-0.5">
+                  <span className="text-text font-medium w-24 shrink-0">{muscle}</span>
+                  <div className="flex items-center gap-2 text-muted">
+                    <span className={isOver ? 'text-success font-semibold' : sets < tgt.min && sets > 0 ? 'text-warn' : ''}>
+                      {sets} sets
+                    </span>
+                    <span className="text-muted/60">min {tgt.min} / goal {tgt.target}</span>
+                  </div>
+                </div>
+                <div className="w-full bg-surfaceAlt rounded-full h-1.5">
+                  <div className={`h-1.5 rounded-full transition-all ${colour}`} style={{ width: `${pct}%` }}/>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <p className="text-xs text-muted mt-3">
+          <span className="text-success">&#9632;</span> At goal
+          <span className="ml-3 text-accent">&#9632;</span> Above minimum
+          <span className="ml-3 text-warn">&#9632;</span> Below minimum
+          <span className="ml-3 text-muted">&#9632;</span> None logged
+        </p>
       </div>
     </div>
   )

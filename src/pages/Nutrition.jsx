@@ -5,7 +5,7 @@ import { format } from 'date-fns'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts'
-import { Trash2, Plus, Scan, Coffee, Pencil } from 'lucide-react'
+import { Trash2, Plus, Scan, Coffee, Pencil, ChevronDown, ChevronRight, Copy } from 'lucide-react'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
 import MicButton from '../components/MicButton.jsx'
 import EditableRow from '../components/EditableRow.jsx'
@@ -38,31 +38,33 @@ function TodayTab({ uid }) {
   const [log, setLog] = useState([])
   const [templates, setTemplates] = useState([])
   const [settings, setSettings] = useState({})
-  const [form, setForm] = useState({ date: today(), timeOfDay: detectTimeOfDay(), name: '', kcal: '', protein: '', carbs: '', fat: '' })
+  const [cardioLog, setCardioLog] = useState([])
+  const [liftsLog, setLiftsLog] = useState([])
+  const [form, setForm] = useState({ date: today(), timeOfDay: detectTimeOfDay(), name: '', kcal: '', protein: '', carbs: '', fat: '', fibre: '' })
   const [saving, setSaving] = useState(false)
   const [scanOpen, setScanOpen] = useState(false)
   const [dietBreaks, setDietBreaks] = useState({})
   const [dbSaving, setDbSaving] = useState(false)
   const [editId, setEditId] = useState(null)
   const [draftPrompt, setDraftPrompt] = useState(null)
+  const [showTimingBreakdown, setShowTimingBreakdown] = useState(false)
+  const [netMode, setNetMode] = useState(false) // subtract cardio kcal from net
   const draftTimer = useRef(null)
 
   useEffect(() => {
-    const u1 = subscribe(uid, 'nutritionLog', setLog, { limit: 100 })
+    const u1 = subscribe(uid, 'nutritionLog', setLog, { limit: 200 })
     const u2 = subscribe(uid, 'mealTemplates', setTemplates, { orderByField: 'createdAt', limit: 50 })
+    const u3 = subscribe(uid, 'cardio', setCardioLog, { limit: 100 })
+    const u4 = subscribe(uid, 'lifts', data => setLiftsLog(data), { limit: 100 })
     getSettings(uid).then(setSettings)
     getAll(uid, 'dietBreaks').then(docs => {
-      const map = {}
-      docs.forEach(d => { map[d.id] = d })
-      setDietBreaks(map)
+      const map = {}; docs.forEach(d => { map[d.id] = d }); setDietBreaks(map)
     })
-    // Check for draft
     const draft = loadDraft(DRAFT_KEY)
     if (draft?.data?.name) setDraftPrompt(draft)
-    return () => { u1(); u2() }
+    return () => { u1(); u2(); u3(); u4() }
   }, [uid])
 
-  // Debounced draft save
   useEffect(() => {
     clearTimeout(draftTimer.current)
     draftTimer.current = setTimeout(() => {
@@ -70,20 +72,38 @@ function TodayTab({ uid }) {
     }, 500)
   }, [form])
 
-  const todayLog = log.filter(l => l.date === today())
+  const todayStr = today()
+  const todayLog = log.filter(l => l.date === todayStr)
   const totals = todayLog.reduce((acc, n) => ({
     kcal: acc.kcal + (parseFloat(n.kcal) || 0),
     protein: acc.protein + (parseFloat(n.protein) || 0),
     carbs: acc.carbs + (parseFloat(n.carbs) || 0),
     fat: acc.fat + (parseFloat(n.fat) || 0),
-  }), { kcal: 0, protein: 0, carbs: 0, fat: 0 })
+    fibre: acc.fibre + (parseFloat(n.fibre) || 0),
+  }), { kcal: 0, protein: 0, carbs: 0, fat: 0, fibre: 0 })
 
-  const todayStr = today()
+  // Cardio kcal burned today (from both standalone cardio log and cardio blocks in lifts)
+  const todayCardioKcal = (() => {
+    const fromCardio = cardioLog
+      .filter(c => c.date === todayStr && c.kcal)
+      .reduce((acc, c) => acc + (parseFloat(c.kcal) || 0), 0)
+    const fromLifts = liftsLog
+      .filter(l => l.date === todayStr && l.cardioBlocks?.length)
+      .reduce((acc, l) => acc + (l.cardioBlocks || []).reduce((a, cb) => a + (parseFloat(cb.kcal) || 0), 0), 0)
+    return fromCardio + fromLifts
+  })()
+
   const activeDietBreak = dietBreaks[todayStr]
   const rawTargets = settings.nutritionTargets || {}
   const targets = activeDietBreak
-    ? { kcal: settings.goal?.tdee || rawTargets.kcal || 2000, protein: rawTargets.protein || 160, carbs: rawTargets.carbs || 200, fat: rawTargets.fat || 70 }
-    : rawTargets
+    ? { kcal: settings.goal?.tdee || rawTargets.kcal || 2000, protein: rawTargets.protein || 160, carbs: rawTargets.carbs || 200, fat: rawTargets.fat || 70, fibre: rawTargets.fibre || 30 }
+    : { ...rawTargets, fibre: rawTargets.fibre || 30 }
+
+  const netKcal = netMode ? Math.max(0, totals.kcal - todayCardioKcal) : totals.kcal
+  const effectiveKcalTarget = netMode ? targets.kcal : targets.kcal
+
+  // Body weight for protein/kg display
+  const bodyWeightKg = settings.profile?.weight || null
 
   const setRefeed = async (type) => {
     setDbSaving(true)
@@ -119,6 +139,7 @@ function TodayTab({ uid }) {
         protein: parseFloat(form.protein) || 0,
         carbs: parseFloat(form.carbs) || 0,
         fat: parseFloat(form.fat) || 0,
+        fibre: parseFloat(form.fibre) || 0,
       }
       if (editId) {
         await setEntry(uid, 'nutritionLog', editId, data)
@@ -127,7 +148,7 @@ function TodayTab({ uid }) {
         await addEntry(uid, 'nutritionLog', data)
       }
       clearDraft(DRAFT_KEY)
-      setForm({ date: today(), timeOfDay: detectTimeOfDay(), name: '', kcal: '', protein: '', carbs: '', fat: '' })
+      setForm({ date: today(), timeOfDay: detectTimeOfDay(), name: '', kcal: '', protein: '', carbs: '', fat: '', fibre: '' })
     } finally { setSaving(false) }
   }
 
@@ -140,17 +161,31 @@ function TodayTab({ uid }) {
       protein: String(entry.protein || ''),
       carbs: String(entry.carbs || ''),
       fat: String(entry.fat || ''),
+      fibre: String(entry.fibre || ''),
     })
     setEditId(entry.id)
   }
 
   const cancelEdit = () => {
     setEditId(null)
-    setForm({ date: today(), timeOfDay: detectTimeOfDay(), name: '', kcal: '', protein: '', carbs: '', fat: '' })
+    setForm({ date: today(), timeOfDay: detectTimeOfDay(), name: '', kcal: '', protein: '', carbs: '', fat: '', fibre: '' })
   }
 
   const quickLog = async (t) => {
-    await addEntry(uid, 'nutritionLog', { date: today(), timeOfDay: detectTimeOfDay(), name: t.name, kcal: t.kcal, protein: t.protein, carbs: t.carbs, fat: t.fat })
+    await addEntry(uid, 'nutritionLog', {
+      date: today(), timeOfDay: detectTimeOfDay(),
+      name: t.name, kcal: t.kcal, protein: t.protein, carbs: t.carbs, fat: t.fat, fibre: t.fibre || 0,
+    })
+  }
+
+  const copyYesterday = async () => {
+    const yesterday = format(new Date(Date.now() - 86400000), 'yyyy-MM-dd')
+    const yesterdayMeals = log.filter(l => l.date === yesterday)
+    if (!yesterdayMeals.length) return
+    for (const meal of yesterdayMeals) {
+      const { id, createdAt, updatedAt, ...rest } = meal
+      await addEntry(uid, 'nutritionLog', { ...rest, date: todayStr, timeOfDay: meal.timeOfDay || null })
+    }
   }
 
   const handleScanResult = ({ name, kcal, protein, carbs, fat }) => {
@@ -158,18 +193,47 @@ function TodayTab({ uid }) {
   }
 
   const hasTargets = !!(rawTargets.kcal && rawTargets.protein)
+
+  // Macro bars config
   const macros = [
-    { key: 'kcal',    name: 'Kcal',      actual: Math.round(totals.kcal),    target: targets.kcal    || 2000 },
-    { key: 'protein', name: 'Protein g', actual: Math.round(totals.protein), target: targets.protein || 160  },
-    { key: 'carbs',   name: 'Carbs g',   actual: Math.round(totals.carbs),   target: targets.carbs   || 200  },
-    { key: 'fat',     name: 'Fat g',     actual: Math.round(totals.fat),     target: targets.fat     || 70   },
+    {
+      key: 'kcal',
+      name: netMode ? 'Net Kcal' : 'Kcal',
+      actual: Math.round(netMode ? netKcal : totals.kcal),
+      target: effectiveKcalTarget || 2000,
+      extra: netMode && todayCardioKcal > 0
+        ? `${totals.kcal.toFixed(0)} eaten − ${todayCardioKcal.toFixed(0)} burned`
+        : null,
+    },
+    {
+      key: 'protein',
+      name: 'Protein',
+      actual: Math.round(totals.protein),
+      target: targets.protein || 160,
+      unit: 'g',
+      perKg: bodyWeightKg ? (totals.protein / bodyWeightKg).toFixed(1) : null,
+    },
+    { key: 'carbs', name: 'Carbs', actual: Math.round(totals.carbs), target: targets.carbs || 200, unit: 'g' },
+    { key: 'fat',   name: 'Fat',   actual: Math.round(totals.fat),   target: targets.fat   || 70,  unit: 'g' },
+    { key: 'fibre', name: 'Fibre', actual: Math.round(totals.fibre), target: targets.fibre || 30,  unit: 'g' },
   ]
+
+  // Time-of-day breakdown
+  const TOD_SLOTS = ['Morning', 'Afternoon', 'Evening', 'Night']
+  const timingTotals = TOD_SLOTS.map(slot => {
+    const meals = todayLog.filter(l => (l.timeOfDay || 'Morning') === slot)
+    return {
+      slot,
+      kcal: Math.round(meals.reduce((a, m) => a + (parseFloat(m.kcal) || 0), 0)),
+      protein: Math.round(meals.reduce((a, m) => a + (parseFloat(m.protein) || 0), 0)),
+      count: meals.length,
+    }
+  }).filter(s => s.count > 0)
 
   return (
     <div className="space-y-4">
       <BarcodeScanner open={scanOpen} onClose={() => setScanOpen(false)} onResult={handleScanResult}/>
 
-      {/* Draft restore prompt */}
       {draftPrompt && (
         <div className="card border-accent/30 bg-accent/5">
           <div className="flex items-center justify-between">
@@ -187,52 +251,95 @@ function TodayTab({ uid }) {
         <div className="card-title flex items-center gap-2"><Coffee size={16} className="text-accent"/>Diet Adherence</div>
         {activeDietBreak ? (
           <div className="flex items-center gap-3">
-            <span className="chip-warn">{activeDietBreak.type === 'refeed' ? '🍽 Refeed day' : '🛌 Diet break'}</span>
+            <span className="chip-warn">{activeDietBreak.type === 'refeed' ? 'Refeed day' : 'Diet break'}</span>
             <span className="text-xs text-muted">Maintenance calories active today</span>
           </div>
         ) : (
           <div className="flex flex-wrap gap-2">
-            <button onClick={() => setRefeed('refeed')} disabled={dbSaving} className="btn-secondary text-xs">
-              Today is a refeed day
-            </button>
-            <button onClick={setDietBreakWeek} disabled={dbSaving} className="btn-secondary text-xs">
-              Diet break (1 week)
-            </button>
+            <button onClick={() => setRefeed('refeed')} disabled={dbSaving} className="btn-secondary text-xs">Today is a refeed day</button>
+            <button onClick={setDietBreakWeek} disabled={dbSaving} className="btn-secondary text-xs">Diet break (1 week)</button>
           </div>
         )}
       </div>
 
       {/* Macro progress bars */}
       <div className="card">
-        <div className="card-title flex items-center justify-between">
-          <span>Today's Macros</span>
-          <button onClick={() => setScanOpen(true)} className="btn-secondary text-xs gap-1">
-            <Scan size={13}/> Scan
-          </button>
+        <div className="flex items-center justify-between mb-3">
+          <span className="card-title">Today's Macros</span>
+          <div className="flex gap-2 items-center">
+            {todayCardioKcal > 0 && (
+              <button
+                onClick={() => setNetMode(n => !n)}
+                className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${netMode ? 'bg-success/20 text-success border-success/40' : 'bg-surfaceAlt text-muted border-border/30'}`}
+              >
+                Net {netMode ? 'on' : 'off'}
+              </button>
+            )}
+            <button onClick={() => setScanOpen(true)} className="btn-secondary text-xs flex items-center gap-1">
+              <Scan size={13}/> Scan
+            </button>
+          </div>
         </div>
+
         {!hasTargets ? (
           <p className="text-sm text-muted">Set your macro targets in <span className="text-accent">Nutrition → Macros</span> to see progress bars.</p>
         ) : macros.map(m => {
           const rawPct = (m.actual / m.target) * 100
-          const displayPct = Math.min(110, rawPct)
-          const colour = rawPct > 110 ? 'bg-danger' : rawPct >= 100 ? 'bg-success' : rawPct >= 80 ? 'bg-success' : 'bg-accent'
+          const isOver = rawPct > 100
+          const displayPct = Math.min(100, rawPct) // bar caps at 100%, over shown by colour
+          const colour = isOver ? 'bg-danger' : rawPct >= 90 ? 'bg-success' : 'bg-accent'
           return (
             <div key={m.key} className="mb-3">
-              <div className="flex justify-between text-xs text-muted mb-1">
-                <span>{m.name}</span>
+              <div className="flex justify-between text-xs mb-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-muted">{m.name}</span>
+                  {m.key === 'protein' && m.perKg && (
+                    <span className="text-accent/70">{m.perKg} g/kg</span>
+                  )}
+                </div>
                 <div className="flex items-center gap-2">
-                  <span className="font-medium text-text">{Math.round(rawPct)}%</span>
-                  <span>{m.actual} / {m.target}</span>
+                  {isOver && <span className="text-danger font-semibold">+{Math.round(m.actual - m.target)}{m.unit || ''} over</span>}
+                  <span className={`font-medium ${isOver ? 'text-danger' : 'text-text'}`}>{m.actual}{m.unit || ''} / {m.target}{m.unit || ''}</span>
                 </div>
               </div>
+              {m.extra && <p className="text-xs text-muted mb-1">{m.extra}</p>}
               <div className="w-full bg-surfaceAlt rounded-full h-2">
                 <div className={`h-2 rounded-full transition-all ${colour}`} style={{ width: `${displayPct}%` }}/>
               </div>
             </div>
           )
         })}
+
+        {netMode && todayCardioKcal > 0 && (
+          <p className="text-xs text-muted mt-1">Cardio burn today: <span className="text-success">{todayCardioKcal.toFixed(0)} kcal</span></p>
+        )}
       </div>
 
+      {/* Meal timing breakdown */}
+      {todayLog.length > 1 && (
+        <div className="card">
+          <button
+            onClick={() => setShowTimingBreakdown(s => !s)}
+            className="text-xs text-muted hover:text-text flex items-center gap-1 w-full text-left"
+          >
+            {showTimingBreakdown ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}
+            Meal timing breakdown
+          </button>
+          {showTimingBreakdown && timingTotals.length > 0 && (
+            <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+              {timingTotals.map(s => (
+                <div key={s.slot} className="bg-surfaceAlt rounded-xl p-3">
+                  <div className="text-xs text-muted mb-1">{s.slot}</div>
+                  <div className="text-sm font-semibold text-text">{s.kcal} kcal</div>
+                  <div className="text-xs text-muted">{s.protein}g protein · {s.count} meal{s.count !== 1 ? 's' : ''}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Quick log templates */}
       {templates.length > 0 && (
         <div className="card">
           <div className="card-title">Quick Log</div>
@@ -250,6 +357,7 @@ function TodayTab({ uid }) {
         </div>
       )}
 
+      {/* Log meal form */}
       <div className="card">
         <div className="card-title">{editId ? 'Edit Meal' : 'Log Meal'}</div>
         <form onSubmit={save} className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -270,39 +378,60 @@ function TodayTab({ uid }) {
               <MicButton onTranscript={t => setForm(p => ({ ...p, name: t }))}/>
             </div>
           </div>
-          {['kcal','protein','carbs','fat'].map(f => (
-            <div key={f}>
-              <label className="label">{f.charAt(0).toUpperCase() + f.slice(1)}{f !== 'kcal' ? ' (g)' : ''}</label>
+          {[
+            { key: 'kcal', label: 'Kcal' },
+            { key: 'protein', label: 'Protein (g)' },
+            { key: 'carbs', label: 'Carbs (g)' },
+            { key: 'fat', label: 'Fat (g)' },
+            { key: 'fibre', label: 'Fibre (g)' },
+          ].map(f => (
+            <div key={f.key}>
+              <label className="label">{f.label}</label>
               <input type="number" min="0" step="1" className="input" placeholder="0"
-                value={form[f]} onChange={e => setForm(p => ({ ...p, [f]: e.target.value }))}/>
+                value={form[f.key]} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}/>
             </div>
           ))}
-          <div className="col-span-2 md:col-span-3 flex gap-2">
-            <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Saving…' : editId ? 'Update Meal' : 'Add Meal'}</button>
+          <div className="col-span-2 md:col-span-3 flex gap-2 flex-wrap">
+            <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Saving...' : editId ? 'Update Meal' : 'Add Meal'}</button>
             {editId && <button type="button" onClick={cancelEdit} className="btn-secondary">Cancel</button>}
           </div>
         </form>
       </div>
 
+      {/* Today's log */}
       <div className="card">
-        <div className="card-title">Today's Log</div>
+        <div className="flex items-center justify-between mb-3">
+          <div className="card-title">Today's Log</div>
+          <button onClick={copyYesterday} className="btn-ghost text-xs flex items-center gap-1">
+            <Copy size={12}/> Copy yesterday
+          </button>
+        </div>
         {todayLog.length === 0 ? (
           <p className="text-sm text-muted">No meals logged today yet.</p>
-        ) : todayLog.map(l => (
-          <EditableRow key={l.id}
-            onEdit={() => startEdit(l)}
-            onDelete={() => deleteEntry(uid, 'nutritionLog', l.id)}
-            className="mb-1"
-          >
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-medium">{l.name}</span>
-                <TodChip tod={l.timeOfDay}/>
+        ) : todayLog.map(l => {
+          const mealProtein = parseFloat(l.protein) || 0
+          const proteinPerKg = bodyWeightKg ? (mealProtein / bodyWeightKg).toFixed(2) : null
+          return (
+            <EditableRow key={l.id}
+              onEdit={() => startEdit(l)}
+              onDelete={() => deleteEntry(uid, 'nutritionLog', l.id)}
+              className="mb-1"
+            >
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-medium">{l.name}</span>
+                  <TodChip tod={l.timeOfDay}/>
+                </div>
+                <div className="text-xs text-muted">
+                  {l.kcal} kcal · {l.protein}g P
+                  {proteinPerKg && <span className="text-accent/70 ml-1">({proteinPerKg} g/kg)</span>}
+                  {' '}· {l.carbs}g C · {l.fat}g F
+                  {l.fibre > 0 && <span> · {l.fibre}g fibre</span>}
+                </div>
               </div>
-              <span className="text-xs text-muted">{l.kcal} kcal · {l.protein}P · {l.carbs}C · {l.fat}F</span>
-            </div>
-          </EditableRow>
-        ))}
+            </EditableRow>
+          )
+        })}
       </div>
     </div>
   )
@@ -443,7 +572,7 @@ function MacrosTab({ uid }) {
     setSaving(true)
     try {
       await saveSettings(uid, {
-        nutritionTargets: { kcal: result.kcal, protein: result.protein, carbs: result.carbs, fat: result.fat },
+        nutritionTargets: { kcal: result.kcal, protein: result.protein, carbs: result.carbs, fat: result.fat, fibre: 30 },
         goal: {
           type: form.goalType,
           rateKgPerWeek: result.cappedRate,
@@ -611,7 +740,7 @@ function addWeeksISO(weeks) {
 // ── Meal Templates ────────────────────────────────────────────────────────────
 function MealsTab({ uid }) {
   const [templates, setTemplates] = useState([])
-  const [form, setForm] = useState({ name: '', kcal: '', protein: '', carbs: '', fat: '' })
+  const [form, setForm] = useState({ name: '', kcal: '', protein: '', carbs: '', fat: '', fibre: '' })
   const [saving, setSaving] = useState(false)
 
   useEffect(() => subscribe(uid, 'mealTemplates', setTemplates, { orderByField: 'createdAt', limit: 100 }), [uid])
@@ -627,8 +756,9 @@ function MealsTab({ uid }) {
         protein: parseFloat(form.protein) || 0,
         carbs: parseFloat(form.carbs) || 0,
         fat: parseFloat(form.fat) || 0,
+        fibre: parseFloat(form.fibre) || 0,
       })
-      setForm({ name: '', kcal: '', protein: '', carbs: '', fat: '' })
+      setForm({ name: '', kcal: '', protein: '', carbs: '', fat: '', fibre: '' })
     } finally { setSaving(false) }
   }
 
@@ -642,7 +772,7 @@ function MealsTab({ uid }) {
             <input type="text" className="input" value={form.name}
               onChange={e => setForm(p => ({ ...p, name: e.target.value }))}/>
           </div>
-          {['kcal','protein','carbs','fat'].map(f => (
+          {['kcal','protein','carbs','fat','fibre'].map(f => (
             <div key={f}>
               <label className="label">{f}</label>
               <input type="number" min="0" className="input" value={form[f]}
@@ -660,7 +790,7 @@ function MealsTab({ uid }) {
           templates.map(t => (
             <div key={t.id} className="flex items-center justify-between bg-bg rounded-lg px-3 py-2 mb-1">
               <span className="text-sm font-medium">{t.name}</span>
-              <span className="text-xs text-muted">{t.kcal} kcal · {t.protein}P · {t.carbs}C · {t.fat}F</span>
+              <span className="text-xs text-muted">{t.kcal} kcal · {t.protein}P · {t.carbs}C · {t.fat}F{t.fibre > 0 ? ` · ${t.fibre}g fibre` : ''}</span>
               <button onClick={() => deleteEntry(uid, 'mealTemplates', t.id)} className="btn-ghost p-1"><Trash2 size={13}/></button>
             </div>
           ))
