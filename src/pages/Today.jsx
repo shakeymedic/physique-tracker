@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
 import { subscribe, addEntry, setEntry, getSettings, getAll } from '../data.js'
 import { format, subDays, startOfWeek } from 'date-fns'
-import { CheckSquare, Square, Apple, Trophy, Cloud, Dumbbell, Heart, Activity } from 'lucide-react'
+import { CheckSquare, Square, Apple, Trophy, Cloud, Dumbbell, Heart, Activity, Play } from 'lucide-react'
 import { quoteOfTheDay } from '../lib/quotes.js'
 import { isMedDueToday, lastTakenDate } from '../clinical/meds.js'
 import { computeMuscleRecovery, muscleStatus } from '../training/exercises.js'
 import WeightChart, { computeWeeklyRate } from '../components/WeightChart.jsx'
 import MoodPicker from '../components/MoodPicker.jsx'
+import { getProgramById, getTodayWorkout } from '../training/programs.js'
 
 const today = () => format(new Date(), 'yyyy-MM-dd')
 
@@ -492,6 +493,85 @@ export default function Today() {
         </div>
       )}
 
+      {/* Active program today's plan */}
+      {settings.activeProgram && <TodayProgramPanel activeProgram={settings.activeProgram} navigate={navigate}/>}
+
     </div>
   )
+}
+
+// ── Today’s program plan panel ─────────────────────────────────────────────────
+function TodayProgramPanel({ activeProgram, navigate }) {
+  const programDef = getProgramById(activeProgram.id)
+  if (!programDef) return null
+
+  const todayWorkoutKey = getTodayWorkout(programDef, activeProgram)
+  const workout = todayWorkoutKey !== 'rest'
+    ? (programDef.workouts?.[todayWorkoutKey] || null)
+    : null
+
+  const isRest = todayWorkoutKey === 'rest'
+  const isCardio = workout?.type === 'cardio'
+  const isMobility = workout?.type === 'mobility'
+
+  return (
+    <div className="card border-accent/20 bg-accent/5">
+      <div className="card-title flex items-center gap-2">
+        <Dumbbell size={16} className="text-accent" />
+        Today’s Plan — {programDef.name}
+      </div>
+
+      {isRest ? (
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-semibold text-text">😴 Rest Day</div>
+            <p className="text-xs text-muted">Recovery is progress.</p>
+          </div>
+          <button onClick={() => navigate('/training')} className="btn-ghost text-xs">
+            View program →
+          </button>
+        </div>
+      ) : isCardio ? (
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <div className="text-sm font-semibold text-text">{workout.name}</div>
+            <p className="text-xs text-muted">{workout.description}</p>
+          </div>
+          <button onClick={() => navigate('/training')} className="btn-primary text-xs flex items-center gap-1 shrink-0">
+            <Play size={12}/> Log
+          </button>
+        </div>
+      ) : isMobility ? (
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <div className="text-sm font-semibold text-text">{workout.name}</div>
+            <p className="text-xs text-muted">{workout.description}</p>
+          </div>
+          <button onClick={() => navigate('/training')} className="btn-primary text-xs flex items-center gap-1 shrink-0">
+            <Play size={12}/> Start
+          </button>
+        </div>
+      ) : workout ? (
+        <div>
+          <div className="text-sm font-semibold text-text mb-2">{workout.name}</div>
+          <div className="flex flex-wrap gap-1 mb-3">
+            {(workout.exercises || []).map((ex, i) => (
+              <span key={i} className="text-xs bg-surfaceAlt text-text px-2 py-0.5 rounded-full">
+                {ex.name}
+              </span>
+            ))}
+          </div>
+          <button
+            onClick={() => navigate('/training')}
+            className="btn-primary text-xs flex items-center gap-1"
+          >
+            <Play size={12}/> Start session
+          </button>
+        </div>
+      ) : (
+        <p className="text-sm text-muted">No specific workout today.</p>
+      )}
+    </div>
+  )
+
 }

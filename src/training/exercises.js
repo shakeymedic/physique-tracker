@@ -5,29 +5,36 @@
  *
  * Also includes cardio types with light fatigue mappings.
  */
-export const EXERCISES = [
-  { name: 'Bench Press', primary: ['Chest'], secondary: ['Triceps', 'Shoulders'] },
-  { name: 'Squat', primary: ['Quads', 'Glutes'], secondary: ['Hamstrings', 'Core'] },
-  { name: 'Deadlift', primary: ['Hamstrings', 'Glutes', 'Back'], secondary: ['Forearms', 'Core'] },
-  { name: 'Overhead Press', primary: ['Shoulders'], secondary: ['Triceps', 'Core'] },
-  { name: 'Barbell Row', primary: ['Back'], secondary: ['Biceps', 'Forearms'] },
-  { name: 'Pull-Up', primary: ['Back'], secondary: ['Biceps', 'Forearms'] },
-  { name: 'Romanian Deadlift', primary: ['Hamstrings', 'Glutes'], secondary: ['Back', 'Forearms'] },
-  { name: 'Front Squat', primary: ['Quads'], secondary: ['Core', 'Glutes'] },
-  { name: 'Incline Bench', primary: ['Chest', 'Shoulders'], secondary: ['Triceps'] },
-  { name: 'Dumbbell Bench', primary: ['Chest'], secondary: ['Triceps', 'Shoulders'] },
-  { name: 'Lat Pulldown', primary: ['Back'], secondary: ['Biceps'] },
-  { name: 'Bicep Curl', primary: ['Biceps'], secondary: ['Forearms'] },
-  { name: 'Tricep Extension', primary: ['Triceps'], secondary: [] },
-  { name: 'Leg Press', primary: ['Quads', 'Glutes'], secondary: ['Hamstrings'] },
-  { name: 'Leg Curl', primary: ['Hamstrings'], secondary: ['Glutes'] },
-  { name: 'Leg Extension', primary: ['Quads'], secondary: [] },
-  { name: 'Calf Raise', primary: ['Calves'], secondary: [] },
-  { name: 'Lateral Raise', primary: ['Shoulders'], secondary: [] },
-  { name: 'Face Pull', primary: ['Shoulders', 'Back'], secondary: [] },
-  { name: 'Hip Thrust', primary: ['Glutes'], secondary: ['Hamstrings', 'Core'] },
-  { name: 'Dip', primary: ['Triceps', 'Chest'], secondary: ['Shoulders'] },
-  { name: 'Push-Up', primary: ['Chest'], secondary: ['Triceps', 'Shoulders', 'Core'] },
+// Legacy alias (for backward compat with existing imports)
+export { BUILT_IN_EXERCISES as EXERCISES }
+
+/**
+ * Built-in exercise list — also aliased as EXERCISES for backward compat.
+ * Each entry has: name, primary, secondary, category
+ */
+export const BUILT_IN_EXERCISES = [
+  { name: 'Bench Press', primary: ['Chest'], secondary: ['Triceps', 'Shoulders'], category: 'strength' },
+  { name: 'Squat', primary: ['Quads', 'Glutes'], secondary: ['Hamstrings', 'Core'], category: 'strength' },
+  { name: 'Deadlift', primary: ['Hamstrings', 'Glutes', 'Back'], secondary: ['Forearms', 'Core'], category: 'strength' },
+  { name: 'Overhead Press', primary: ['Shoulders'], secondary: ['Triceps', 'Core'], category: 'strength' },
+  { name: 'Barbell Row', primary: ['Back'], secondary: ['Biceps', 'Forearms'], category: 'strength' },
+  { name: 'Pull-Up', primary: ['Back'], secondary: ['Biceps', 'Forearms'], category: 'strength' },
+  { name: 'Romanian Deadlift', primary: ['Hamstrings', 'Glutes'], secondary: ['Back', 'Forearms'], category: 'strength' },
+  { name: 'Front Squat', primary: ['Quads'], secondary: ['Core', 'Glutes'], category: 'strength' },
+  { name: 'Incline Bench', primary: ['Chest', 'Shoulders'], secondary: ['Triceps'], category: 'strength' },
+  { name: 'Dumbbell Bench', primary: ['Chest'], secondary: ['Triceps', 'Shoulders'], category: 'strength' },
+  { name: 'Lat Pulldown', primary: ['Back'], secondary: ['Biceps'], category: 'strength' },
+  { name: 'Bicep Curl', primary: ['Biceps'], secondary: ['Forearms'], category: 'strength' },
+  { name: 'Tricep Extension', primary: ['Triceps'], secondary: [], category: 'strength' },
+  { name: 'Leg Press', primary: ['Quads', 'Glutes'], secondary: ['Hamstrings'], category: 'strength' },
+  { name: 'Leg Curl', primary: ['Hamstrings'], secondary: ['Glutes'], category: 'strength' },
+  { name: 'Leg Extension', primary: ['Quads'], secondary: [], category: 'strength' },
+  { name: 'Calf Raise', primary: ['Calves'], secondary: [], category: 'strength' },
+  { name: 'Lateral Raise', primary: ['Shoulders'], secondary: [], category: 'strength' },
+  { name: 'Face Pull', primary: ['Shoulders', 'Back'], secondary: [], category: 'strength' },
+  { name: 'Hip Thrust', primary: ['Glutes'], secondary: ['Hamstrings', 'Core'], category: 'strength' },
+  { name: 'Dip', primary: ['Triceps', 'Chest'], secondary: ['Shoulders'], category: 'strength' },
+  { name: 'Push-Up', primary: ['Chest'], secondary: ['Triceps', 'Shoulders', 'Core'], category: 'strength' },
 ]
 
 /**
@@ -66,11 +73,13 @@ export const MUSCLE_REGIONS = [
  * @param {string} today - 'YYYY-MM-DD'
  * @returns {object} { [muscle]: daysAgo } — null means never trained
  */
-export function computeMuscleRecovery(lifts, today, cardioSessions = []) {
+export function computeMuscleRecovery(lifts, today, cardioSessions = [], allExercises = []) {
   const lastTrained = {}
+  // Merge built-in + any custom exercises passed in
+  const exDb = allExercises.length > 0 ? allExercises : BUILT_IN_EXERCISES
 
   lifts.forEach(lift => {
-    // Handle new multi-exercise shape
+    // Handle new multi-exercise shape AND legacy single-exercise shape
     const exercises = lift.exercises
       ? lift.exercises
       : lift.exercise
@@ -78,7 +87,7 @@ export function computeMuscleRecovery(lifts, today, cardioSessions = []) {
         : []
 
     exercises.forEach(exEntry => {
-      const ex = EXERCISES.find(e => e.name === exEntry.name)
+      const ex = exDb.find(e => e.name === exEntry.name)
       if (!ex || !lift.date) return
       const muscles = [...ex.primary, ...ex.secondary]
       muscles.forEach(m => {

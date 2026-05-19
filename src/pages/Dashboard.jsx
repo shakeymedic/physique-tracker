@@ -6,10 +6,44 @@ import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid,
 } from 'recharts'
-import { CheckSquare, Square, TrendingUp, Dumbbell, Droplets, Activity, Target, Heart, Zap } from 'lucide-react'
+import { CheckSquare, Square, TrendingUp, Dumbbell, Droplets, Activity, Target, Heart, Zap, Trophy } from 'lucide-react'
 import { flag } from '../clinical/ranges.js'
 import WeightChart, { computeWeeklyRate } from '../components/WeightChart.jsx'
 import ConsistencyHeatmap from '../components/ConsistencyHeatmap.jsx'
+import { getProgramById } from '../training/programs.js'
+import MilestoneRow from '../components/MilestoneRow.jsx'
+
+const epleyDash = (w, r) => parseFloat(w) * (1 + parseFloat(r) / 30)
+
+function getBestE1RMDash(lifts, exerciseName) {
+  let best = 0
+  lifts.forEach(l => {
+    const exercises = l.exercises
+      ? l.exercises
+      : l.exercise
+        ? [{ name: l.exercise, sets: l.sets || [] }]
+        : []
+    exercises.filter(e => e.name === exerciseName).forEach(e => {
+      ;(e.sets || []).forEach(s => {
+        const e1 = epleyDash(s.weight, s.reps)
+        if (e1 > best) best = e1
+      })
+    })
+  })
+  return best
+}
+
+function computeMilestoneProgressDash(milestone, lifts, weights) {
+  if (!milestone?.exercise) return { hit: false, progress: 0, currentKg: null, targetKg: null }
+  const latestWeight = weights?.length
+    ? weights.slice().sort((a, b) => b.date.localeCompare(a.date))[0]?.weight || 80
+    : 80
+  const targetKg = latestWeight * (milestone.multiplier || 1.0)
+  const currentKg = getBestE1RMDash(lifts, milestone.exercise)
+  const progress = targetKg > 0 ? Math.min(1, currentKg / targetKg) : 0
+  const hit = currentKg >= targetKg * 0.99
+  return { hit, progress, currentKg, targetKg }
+}
 
 function FlagChip({ name, value, sex }) {
   const f = flag(name, value, sex)
@@ -389,6 +423,35 @@ export default function Insights() {
         </div>
 
       </div>
+
+      {/* Program Milestones */}
+      {settings.activeProgram && (() => {
+        const prog = getProgramById(settings.activeProgram.id)
+        if (!prog?.milestones?.length) return null
+        const exerciseMilestones = prog.milestones.filter(m => m.exercise)
+        if (!exerciseMilestones.length) return null
+        return (
+          <div className="card">
+            <div className="card-title flex items-center gap-2">
+              <Trophy size={16} className="text-warn"/> Program Milestones — {prog.name}
+            </div>
+            {exerciseMilestones.map(m => {
+              const { hit, progress, currentKg, targetKg } = computeMilestoneProgressDash(m, lifts, weights)
+              return (
+                <MilestoneRow
+                  key={m.id}
+                  milestone={m}
+                  progress={progress}
+                  hit={hit}
+                  currentKg={currentKg}
+                  targetKg={targetKg}
+                />
+              )
+            })}
+          </div>
+        )
+      })()}
+
     </div>
   )
 }

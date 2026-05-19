@@ -96,6 +96,13 @@ export const BADGE_DEFS = [
   { id: 'selfcare-champion', name: 'Self-Care Champion',  icon: 'Heart',     desc: 'Hit weekly self-care goal' },
   { id: 'mood-tracker',      name: 'Mood Tracker',        icon: 'Smile',     desc: '14-day mood-log streak' },
   { id: 'med-adherent',      name: 'Med Adherent',        icon: 'Pill',      desc: '30 days no missed scheduled meds' },
+  // ── Program milestones ──
+  { id: 'program-enrolled',   name: 'Committed',            icon: 'Zap',       desc: 'Enrol in a workout program' },
+  { id: 'program-week4',      name: 'Month Strong',         icon: 'Calendar',  desc: 'Complete 4 weeks of a program' },
+  { id: 'program-complete',   name: 'Program Complete',     icon: 'Trophy',    desc: 'Finish a 12-week program' },
+  { id: 'mobility-7',         name: 'Mobility Habit',       icon: 'Activity',  desc: '7 mobility sessions logged' },
+  { id: 'mobility-30',        name: 'Flexible',             icon: 'Heart',     desc: '30 mobility sessions logged' },
+  { id: 'milestone-first',    name: 'Milestone Hit',        icon: 'CheckCircle', desc: 'Hit your first program milestone' },
 ]
 
 // ── Main computation ───────────────────────────────────────────────────────────
@@ -104,7 +111,7 @@ export const BADGE_DEFS = [
  * Compute all achievements from raw data.
  * Returns { streaks, badges }
  */
-export function computeAchievements({ weights = [], lifts = [], cardio = [], nutritionLog = [], medicationLog = [], wellbeing = [], selfCareLog = [], settings = {} }) {
+export function computeAchievements({ weights = [], lifts = [], cardio = [], nutritionLog = [], medicationLog = [], wellbeing = [], selfCareLog = [], mobilityLog = [], settings = {} }) {
   const goals = settings.activityGoals || {}
   const gymGoal = goals.gymPerWeek || 3
   const nutritionTargets = settings.nutritionTargets || {}
@@ -161,6 +168,46 @@ export function computeAchievements({ weights = [], lifts = [], cardio = [], nut
   // ── Self-care weekly goal hit ────────────────────────────────────────────────
   const thisWeekStart = format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd')
   const thisWeekSelfCare = selfCareLog.filter(s => s.date >= thisWeekStart).length
+
+
+  // ── Program milestone data ─────────────────────────────────────────────────
+  const activeProgram = settings.activeProgram || null
+  const programEnrolled = !!activeProgram
+  const programWeekNum = activeProgram?.startDate
+    ? (() => {
+        const start = new Date(activeProgram.startDate)
+        const diffDays = Math.floor((new Date() - start) / (1000 * 60 * 60 * 24))
+        return Math.floor(diffDays / 7) + 1
+      })()
+    : 0
+  const programComplete = programWeekNum >= 12
+
+  const epleyA = (w, r) => parseFloat(w) * (1 + parseFloat(r) / 30)
+  function getBestE1RM(exerciseName) {
+    let best = 0
+    lifts.forEach(l => {
+      const exs = l.exercises
+        ? l.exercises
+        : l.exercise ? [{ name: l.exercise, sets: l.sets || [] }] : []
+      exs.filter(e => e.name === exerciseName).forEach(e => {
+        ;(e.sets || []).forEach(s => {
+          const v = epleyA(s.weight, s.reps)
+          if (v > best) best = v
+        })
+      })
+    })
+    return best
+  }
+
+  const latestBodyWeight = weights.length
+    ? weights.slice().sort((a, b) => b.date.localeCompare(a.date))[0]?.weight || 80
+    : 80
+
+  const anyMilestoneHit = [
+    { ex: 'Squat', mult: 1.0 },
+    { ex: 'Bench Press', mult: 0.8 },
+    { ex: 'Deadlift', mult: 1.25 },
+  ].some(({ ex, mult }) => getBestE1RM(ex) >= latestBodyWeight * mult)
 
   // ── Badge evaluation ─────────────────────────────────────────────────────────
   const badges = BADGE_DEFS.map(def => {
@@ -241,6 +288,34 @@ export function computeAchievements({ weights = [], lifts = [], cardio = [], nut
         // Simple heuristic: 30+ medication log entries
         earned = medicationLog.length >= 30
         progress = Math.min(1, medicationLog.length / 30)
+        break
+
+      case 'program-enrolled':
+        earned = programEnrolled
+        break
+
+      case 'program-week4':
+        earned = programWeekNum >= 4
+        progress = Math.min(1, programWeekNum / 4)
+        break
+
+      case 'program-complete':
+        earned = programComplete
+        progress = Math.min(1, programWeekNum / 12)
+        break
+
+      case 'mobility-7':
+        earned = mobilityLog.length >= 7
+        progress = Math.min(1, mobilityLog.length / 7)
+        break
+
+      case 'mobility-30':
+        earned = mobilityLog.length >= 30
+        progress = Math.min(1, mobilityLog.length / 30)
+        break
+
+      case 'milestone-first':
+        earned = anyMilestoneHit
         break
 
       default:

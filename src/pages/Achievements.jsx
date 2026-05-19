@@ -6,13 +6,13 @@ import { computeAchievements, BADGE_DEFS } from '../lib/achievements.js'
 import {
   Scale, Calendar, Sun, Dumbbell, Trophy, Zap, HeartPulse, Activity,
   Target, TrendingUp, Apple, Droplets, Heart, Smile, Pill, Award,
-  ArrowLeft, Flame, Lock,
+  ArrowLeft, Flame, Lock, CheckCircle,
 } from 'lucide-react'
 
 // Map badge icon name → Lucide component
 const ICON_MAP = {
   Scale, Calendar, Sun, Dumbbell, Trophy, Zap, HeartPulse, Activity,
-  Target, TrendingUp, Apple, Droplets, Heart, Smile, Pill,
+  Target, TrendingUp, Apple, Droplets, Heart, Smile, Pill, CheckCircle,
 }
 
 function BadgeIcon({ name, size = 28, className = '' }) {
@@ -114,6 +114,7 @@ export default function Achievements() {
   const [medicationLog, setMedicationLog] = useState([])
   const [wellbeing, setWellbeing] = useState([])
   const [selfCareLog, setSelfCareLog] = useState([])
+  const [mobilityLog, setMobilityLog] = useState([])
   const [settings, setSettings] = useState({})
 
   useEffect(() => {
@@ -125,12 +126,13 @@ export default function Achievements() {
     const u5 = subscribe(uid, 'medicationLog', setMedicationLog, { limit: 200 })
     const u6 = subscribe(uid, 'wellbeing', setWellbeing, { limit: 200 })
     const u7 = subscribe(uid, 'selfCareLog', setSelfCareLog, { limit: 200 })
+    const u8 = subscribe(uid, 'mobilityLog', setMobilityLog, { limit: 200 })
     getSettings(uid).then(setSettings)
-    return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7() }
+    return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8() }
   }, [uid])
 
   const { streaks, badges } = computeAchievements({
-    weights, lifts, cardio, nutritionLog, medicationLog, wellbeing, selfCareLog, settings,
+    weights, lifts, cardio, nutritionLog, medicationLog, wellbeing, selfCareLog, mobilityLog, settings,
   })
 
   const earned = badges.filter(b => b.earned)

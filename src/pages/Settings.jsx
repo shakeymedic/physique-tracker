@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
-import { getSettings, saveSettings, getAll, addEntry } from '../data.js'
-import { Download, LogOut, Save, CloudUpload, Bell, BellOff, Database, Award, X, Plus } from 'lucide-react'
+import { getSettings, saveSettings, getAll, addEntry, deleteEntry, setEntry } from '../data.js'
+import { Download, LogOut, Save, CloudUpload, Bell, BellOff, Database, Award, X, Plus, Trash2, Pencil, Dumbbell, Activity, Zap } from 'lucide-react'
 import { requestNotificationPermission } from '../lib/messaging.js'
 import { backupToDrive } from '../lib/drive.js'
+import { getProgramById } from '../training/programs.js'
+import { computeWeekNumber } from '../training/programs.js'
 
 const SEED_MEALS = [
   { name: 'Porridge with banana', kcal: 380, protein: 14, carbs: 60, fat: 8 },
@@ -330,6 +332,33 @@ export default function Settings() {
         </button>
       </Section>
 
+      {/* Active Program */}
+      <ActiveProgramSection uid={uid} navigate={navigate}/>
+
+      {/* Custom exercises management */}
+      <CustomExercisesSection uid={uid}/>
+
+      {/* Custom routines/programs links */}
+      <Section title="Custom Routines &amp; Programs">
+        <p className="text-sm text-muted mb-3">Manage your saved custom mobility routines and workout programs.</p>
+        <div className="flex gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => navigate('/training')}
+            className="btn-secondary flex items-center gap-2 text-sm"
+          >
+            <Activity size={14}/> Manage Routines (in Training → Mobility)
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/training')}
+            className="btn-secondary flex items-center gap-2 text-sm"
+          >
+            <Zap size={14}/> Manage Programs (in Training → Programs)
+          </button>
+        </div>
+      </Section>
+
       {/* Achievements link */}
       <Section title="Achievements">
         <p className="text-sm text-muted mb-3">View your earned badges and streaks based on your logged data.</p>
@@ -390,5 +419,154 @@ export default function Settings() {
         </button>
       </Section>
     </div>
+  )
+}
+
+// ── Active Program Section ─────────────────────────────────────────────────────
+function ActiveProgramSection({ uid, navigate }) {
+  const [settings, setSettings] = useState(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    getSettings(uid).then(setSettings)
+  }, [uid])
+
+  if (!settings) return null
+
+  const activeProgram = settings.activeProgram
+  const programDef = activeProgram ? getProgramById(activeProgram.id) : null
+
+  const exitProgram = async () => {
+    if (!confirm('Exit current program?')) return
+    setSaving(true)
+    try {
+      await saveSettings(uid, { activeProgram: null })
+      setSettings(prev => ({ ...prev, activeProgram: null }))
+    } finally { setSaving(false) }
+  }
+
+  if (!programDef) return (
+    <Section title="Active Program">
+      <p className="text-sm text-muted mb-3">No active program. Start one in Training → Programs.</p>
+      <button
+        type="button"
+        onClick={() => navigate('/training')}
+        className="btn-secondary flex items-center gap-2 text-sm"
+      >
+        <Dumbbell size={14}/> Browse Programs
+      </button>
+    </Section>
+  )
+
+  const weekNum = computeWeekNumber(activeProgram)
+  const totalWeeks = programDef.durationWeeks
+  const pct = Math.round((weekNum / totalWeeks) * 100)
+
+  return (
+    <Section title="Active Program">
+      <div className="flex items-start justify-between mb-3">
+        <div>
+          <div className="font-semibold text-text">{programDef.name}</div>
+          <div className="text-xs text-muted">Week {weekNum} of {totalWeeks} · Started {activeProgram.startDate}</div>
+        </div>
+        <span className="chip-ok text-xs">{programDef.difficulty}</span>
+      </div>
+      <div className="w-full bg-surfaceAlt rounded-full h-1.5 mb-3">
+        <div className="bg-accent h-1.5 rounded-full transition-all" style={{ width: `${pct}%` }}/>
+      </div>
+      <div className="flex gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() => navigate('/training')}
+          className="btn-secondary text-xs"
+        >
+          View program details
+        </button>
+        <button
+          type="button"
+          onClick={exitProgram}
+          className="btn-danger text-xs"
+          disabled={saving}
+        >
+          {saving ? 'Exiting…' : 'Exit program'}
+        </button>
+      </div>
+    </Section>
+  )
+}
+
+// ── Custom Exercises Section ───────────────────────────────────────────────────
+function CustomExercisesSection({ uid }) {
+  const [exercises, setExercises] = useState([])
+  const [editing, setEditing] = useState(null)
+  const [editName, setEditName] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    getAll(uid, 'customExercises').then(setExercises)
+  }, [uid])
+
+  const deleteEx = async (id) => {
+    if (!confirm('Delete this custom exercise?')) return
+    await deleteEntry(uid, 'customExercises', id)
+    setExercises(prev => prev.filter(e => e.id !== id))
+  }
+
+  const startEdit = (ex) => {
+    setEditing(ex.id)
+    setEditName(ex.name)
+  }
+
+  const saveEdit = async (ex) => {
+    if (!editName.trim()) return
+    setSaving(true)
+    try {
+      await setEntry(uid, 'customExercises', ex.id, { ...ex, name: editName.trim() })
+      setExercises(prev => prev.map(e => e.id === ex.id ? { ...e, name: editName.trim() } : e))
+      setEditing(null)
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <Section title="Custom Exercises">
+      <p className="text-sm text-muted mb-3">Exercises you've added. Edit names or delete here. Add new ones via the exercise picker in Training → Log.</p>
+      {exercises.length === 0 ? (
+        <p className="text-sm text-muted">No custom exercises yet.</p>
+      ) : (
+        <div className="space-y-2">
+          {exercises.map(ex => (
+            <div key={ex.id} className="flex items-center gap-2 bg-surfaceAlt rounded-xl px-3 py-2">
+              {editing === ex.id ? (
+                <>
+                  <input
+                    type="text"
+                    className="input flex-1 text-sm py-1"
+                    value={editName}
+                    onChange={e => setEditName(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') saveEdit(ex) }}
+                  />
+                  <button onClick={() => saveEdit(ex)} className="btn-primary text-xs" disabled={saving}>
+                    {saving ? '…' : 'Save'}
+                  </button>
+                  <button onClick={() => setEditing(null)} className="btn-ghost text-xs">Cancel</button>
+                </>
+              ) : (
+                <>
+                  <Dumbbell size={13} className="text-accent shrink-0"/>
+                  <span className="flex-1 text-sm text-text">{ex.name}</span>
+                  <span className="text-xs text-muted">{ex.category}</span>
+                  <button onClick={() => startEdit(ex)} className="btn-ghost p-1">
+                    <Pencil size={13}/>
+                  </button>
+                  <button onClick={() => deleteEx(ex.id)} className="btn-ghost p-1 text-danger">
+                    <Trash2 size={13}/>
+                  </button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </Section>
   )
 }
