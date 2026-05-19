@@ -97,168 +97,143 @@ function Tabs({ active, set }) {
   )
 }
 
-// ── Searchable Exercise Picker ─────────────────────────────────────────────────
-function AddExercisePicker({ uid, onAdd }) {
+// ── Exercise Picker (dropdown style) ──────────────────────────────────────────
+function ExercisePicker({ uid, onAdd }) {
   const { all: allExercises, loading } = useExerciseList(uid)
-  const [query, setQuery] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState('All')
+  const [selected, setSelected] = useState('')
   const [showAddForm, setShowAddForm] = useState(false)
-  const [addForm, setAddForm] = useState({
-    name: '', category: 'strength', primary: '', secondary: '', notes: ''
-  })
+  const [addForm, setAddForm] = useState({ name: '', category: 'strength', primary: '', secondary: '' })
   const [addSaving, setAddSaving] = useState(false)
 
-  const categories = ['All', 'strength', 'cardio', 'mobility', 'other', 'Custom']
-
-  const filtered = allExercises.filter(e => {
-    const matchQuery = !query.trim() || e.name.toLowerCase().includes(query.toLowerCase())
-    let matchCat = true
-    if (categoryFilter === 'Custom') matchCat = !!e.isCustom
-    else if (categoryFilter !== 'All') matchCat = (e.category || 'strength') === categoryFilter
-    return matchQuery && matchCat
+  // Group exercises by category for <optgroup>
+  const grouped = { strength: [], cardio: [], mobility: [], other: [], Custom: [] }
+  allExercises.forEach(ex => {
+    if (ex.isCustom) grouped.Custom.push(ex)
+    else grouped[ex.category || 'strength']?.push(ex)
   })
+
+  const handleAdd = () => {
+    if (!selected) return
+    onAdd(selected)
+    setSelected('')
+  }
 
   const saveCustom = async () => {
     if (!addForm.name.trim() || !uid) return
     setAddSaving(true)
     try {
-      const data = {
+      await addEntry(uid, 'customExercises', {
         name: addForm.name.trim(),
         category: addForm.category,
         primary: addForm.primary ? addForm.primary.split(',').map(s => s.trim()).filter(Boolean) : [],
         secondary: addForm.secondary ? addForm.secondary.split(',').map(s => s.trim()).filter(Boolean) : [],
-        notes: addForm.notes,
         isMobility: addForm.category === 'mobility',
-        defaultDurationSec: null,
-        defaultSets: null,
-      }
-      await addEntry(uid, 'customExercises', data)
-      // Immediately add to session
+      })
       onAdd(addForm.name.trim())
-      setAddForm({ name: '', category: 'strength', primary: '', secondary: '', notes: '' })
+      setAddForm({ name: '', category: 'strength', primary: '', secondary: '' })
       setShowAddForm(false)
-      setQuery('')
     } finally { setAddSaving(false) }
   }
 
-  if (loading) return <div className="text-xs text-muted mt-2">Loading exercises…</div>
+  if (loading) return <p className="text-xs text-muted">Loading exercises...</p>
 
-  return (
-    <div className="mt-2">
-      {/* Search input */}
-      <div className="mb-2">
+  if (showAddForm) {
+    return (
+      <div className="bg-surfaceAlt rounded-xl p-3 space-y-2">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-sm font-semibold text-text">New exercise</span>
+          <button onClick={() => setShowAddForm(false)} className="btn-ghost p-0.5"><X size={14}/></button>
+        </div>
         <input
-          type="text"
-          className="input w-full"
-          placeholder="Search exercises…"
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          autoComplete="off"
+          className="input"
+          placeholder="Exercise name *"
+          value={addForm.name}
+          onChange={e => setAddForm(p => ({ ...p, name: e.target.value }))}
+          autoFocus
         />
-      </div>
-
-      {/* Category filter */}
-      <div className="flex gap-1.5 flex-wrap mb-2">
-        {categories.map(cat => (
-          <button
-            key={cat}
-            onClick={() => setCategoryFilter(cat)}
-            className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
-              categoryFilter === cat
-                ? 'bg-accent text-bg border-accent'
-                : 'bg-surfaceAlt text-muted border-border/30'
-            }`}
-          >{cat === 'strength' ? 'Strength' : cat === 'cardio' ? 'Cardio' : cat === 'mobility' ? 'Mobility' : cat === 'other' ? 'Other' : cat}</button>
-        ))}
-      </div>
-
-      {/* Exercise list */}
-      <div className="flex flex-wrap gap-1 max-h-36 overflow-y-auto mb-2">
-        {filtered.slice(0, 40).map(ex => (
-          <button
-            key={ex.name}
-            onClick={() => { onAdd(ex.name); setQuery('') }}
-            className="btn-secondary text-xs py-1 flex items-center gap-1"
-          >
-            <Plus size={11}/>
-            {ex.name}
-            {ex.isCustom && <span className="text-accent text-[10px] font-medium ml-0.5">Custom</span>}
-          </button>
-        ))}
-        {filtered.length === 0 && (
-          <p className="text-xs text-muted py-1">No exercises found{query ? ` for "${query}"` : ''}</p>
-        )}
-      </div>
-
-      {/* Add custom exercise */}
-      {!showAddForm ? (
-        <button
-          onClick={() => setShowAddForm(true)}
-          className="btn-ghost text-xs flex items-center gap-1 text-accent"
-        >
-          <Plus size={12}/> Add custom exercise
-        </button>
-      ) : (
-        <div className="bg-surfaceAlt rounded-xl p-3 mt-2 space-y-2">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs font-medium text-text">New custom exercise</span>
-            <button onClick={() => setShowAddForm(false)} className="btn-ghost p-0.5"><X size={14}/></button>
-          </div>
-          <input
-            type="text"
-            className="input text-sm"
-            placeholder="Exercise name *"
-            value={addForm.name}
-            onChange={e => setAddForm(p => ({ ...p, name: e.target.value }))}
-          />
-          <select
-            className="input text-sm"
-            value={addForm.category}
-            onChange={e => setAddForm(p => ({ ...p, category: e.target.value }))}
-          >
+        <div className="flex gap-2">
+          <select className="input flex-1" value={addForm.category} onChange={e => setAddForm(p => ({ ...p, category: e.target.value }))}>
             <option value="strength">Strength</option>
             <option value="cardio">Cardio</option>
             <option value="mobility">Mobility</option>
             <option value="other">Other</option>
           </select>
-          <input
-            type="text"
-            className="input text-sm"
-            placeholder="Primary muscles (comma separated)"
-            value={addForm.primary}
-            onChange={e => setAddForm(p => ({ ...p, primary: e.target.value }))}
-          />
-          <input
-            type="text"
-            className="input text-sm"
-            placeholder="Secondary muscles (optional)"
-            value={addForm.secondary}
-            onChange={e => setAddForm(p => ({ ...p, secondary: e.target.value }))}
-          />
-          <input
-            type="text"
-            className="input text-sm"
-            placeholder="Notes (optional)"
-            value={addForm.notes}
-            onChange={e => setAddForm(p => ({ ...p, notes: e.target.value }))}
-          />
-          <div className="flex gap-2">
-            <button
-              onClick={saveCustom}
-              className="btn-primary text-xs"
-              disabled={addSaving || !addForm.name.trim()}
-            >
-              {addSaving ? 'Saving…' : 'Save & Add'}
-            </button>
-            <button onClick={() => setShowAddForm(false)} className="btn-ghost text-xs">Cancel</button>
-          </div>
         </div>
-      )}
+        <input
+          className="input text-sm"
+          placeholder="Primary muscles (optional, comma separated)"
+          value={addForm.primary}
+          onChange={e => setAddForm(p => ({ ...p, primary: e.target.value }))}
+        />
+        <input
+          className="input text-sm"
+          placeholder="Secondary muscles (optional)"
+          value={addForm.secondary}
+          onChange={e => setAddForm(p => ({ ...p, secondary: e.target.value }))}
+        />
+        <div className="flex gap-2">
+          <button onClick={saveCustom} className="btn-primary text-sm flex-1" disabled={addSaving || !addForm.name.trim()}>
+            {addSaving ? 'Saving...' : 'Save & add to session'}
+          </button>
+          <button onClick={() => setShowAddForm(false)} className="btn-secondary text-sm">Cancel</button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex gap-2">
+      <select
+        className="input flex-1"
+        value={selected}
+        onChange={e => setSelected(e.target.value)}
+      >
+        <option value="">Add exercise to session...</option>
+        {grouped.strength.length > 0 && (
+          <optgroup label="Strength">
+            {grouped.strength.map(ex => <option key={ex.name} value={ex.name}>{ex.name}</option>)}
+          </optgroup>
+        )}
+        {grouped.cardio.length > 0 && (
+          <optgroup label="Cardio">
+            {grouped.cardio.map(ex => <option key={ex.name} value={ex.name}>{ex.name}</option>)}
+          </optgroup>
+        )}
+        {grouped.mobility.length > 0 && (
+          <optgroup label="Mobility">
+            {grouped.mobility.map(ex => <option key={ex.name} value={ex.name}>{ex.name}</option>)}
+          </optgroup>
+        )}
+        {grouped.other.length > 0 && (
+          <optgroup label="Other">
+            {grouped.other.map(ex => <option key={ex.name} value={ex.name}>{ex.name}</option>)}
+          </optgroup>
+        )}
+        {grouped.Custom.length > 0 && (
+          <optgroup label="Custom">
+            {grouped.Custom.map(ex => <option key={ex.name} value={ex.name}>{ex.name}</option>)}
+          </optgroup>
+        )}
+      </select>
+      <button
+        onClick={handleAdd}
+        disabled={!selected}
+        className="btn-primary shrink-0 flex items-center gap-1"
+      >
+        <Plus size={14}/> Add
+      </button>
+      <button
+        onClick={() => setShowAddForm(true)}
+        className="btn-secondary shrink-0 text-sm flex items-center gap-1"
+        title="Create new exercise"
+      >
+        <Plus size={13}/> New
+      </button>
     </div>
   )
 }
 
-// ── Log (multi-exercise + cardio-block session) ───────────────────────────────
+// ── Log Tab ────────────────────────────────────────────────────────────────────
 function LogTab({ uid, initialEditLift, onEditStart }) {
   const DRAFT_KEY = `pt-draft-training-${uid}`
 
@@ -270,9 +245,8 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
   })
 
   const [session, setSession] = useState(emptySession)
-  // Per-exercise set forms keyed by exIdx
+  // Per-exercise set forms: { [exIdx]: { weight, reps, rpe } }
   const [setForms, setSetForms] = useState({})
-  const [activeExIdx, setActiveExIdx] = useState(null)
   const [saving, setSaving] = useState(false)
   const [savedSummary, setSavedSummary] = useState(null)
   const [editId, setEditId] = useState(null)
@@ -304,62 +278,24 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
     if (draftPrompt?.data) { setSession(draftPrompt.data); setDraftPrompt(null) }
   }
 
-  // Get the set form for a given exercise index (default blank)
   const getSetForm = (idx) => setForms[idx] || { weight: '', reps: '', rpe: '7' }
   const updateSetForm = (idx, field, val) => setSetForms(prev => ({
     ...prev, [idx]: { ...getSetForm(idx), [field]: val }
   }))
 
-  // Carry forward last set's weight/reps as default for next set
-  const prefillSetForm = (idx, ex) => {
-    if (ex.sets.length === 0) return
-    const last = ex.sets[ex.sets.length - 1]
-    setSetForms(prev => ({
-      ...prev,
-      [idx]: { weight: String(last.weight), reps: String(last.reps), rpe: String(last.rpe || 7) }
-    }))
-  }
-
-  const addStrengthExercise = (name) => {
-    const newIdx = session.exercises.length
-    setSession(prev => ({
-      ...prev,
-      exercises: [...prev.exercises, { type: 'strength', name, sets: [] }],
-    }))
-    setActiveExIdx(newIdx)
-  }
-
-  const addCardioBlock = () => {
-    const newIdx = session.exercises.length
-    setSession(prev => ({
-      ...prev,
-      exercises: [...prev.exercises, {
-        type: 'cardio',
-        name: 'Running',
-        cardio: { type: 'Running', durationMin: '', distanceKm: '', kcal: '', avgHr: '', rpe: '' }
-      }],
-    }))
-    setActiveExIdx(newIdx)
-  }
-
-  const removeExercise = (idx) => {
-    setSession(prev => ({ ...prev, exercises: prev.exercises.filter((_, i) => i !== idx) }))
-    setSetForms(prev => { const n = { ...prev }; delete n[idx]; return n })
-    if (activeExIdx === idx) setActiveExIdx(null)
-  }
-
+  // After adding a set, carry weight forward, clear reps
   const addSet = (exIdx) => {
     const sf = getSetForm(exIdx)
     if (!sf.weight || !sf.reps) return
     const newSet = { weight: parseFloat(sf.weight), reps: parseInt(sf.reps), rpe: parseFloat(sf.rpe) }
-    setSession(prev => {
-      const exercises = prev.exercises.map((ex, i) =>
+    setSession(prev => ({
+      ...prev,
+      exercises: prev.exercises.map((ex, i) =>
         i === exIdx ? { ...ex, sets: [...ex.sets, newSet] } : ex
-      )
-      return { ...prev, exercises }
-    })
-    // Carry forward weight, clear reps
-    setSetForms(prev => ({ ...prev, [exIdx]: { ...sf, reps: '' } }))
+      ),
+    }))
+    // Carry weight, clear reps ready for next set
+    setSetForms(prev => ({ ...prev, [exIdx]: { weight: sf.weight, reps: '', rpe: sf.rpe } }))
   }
 
   const removeSet = (exIdx, setIdx) => {
@@ -371,16 +307,57 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
     }))
   }
 
+  const addExercise = (name) => {
+    setSession(prev => ({
+      ...prev,
+      exercises: [...prev.exercises, { type: 'strength', name, sets: [] }],
+    }))
+    // Pre-fill set form with last-used data for this exercise across all history
+    const exIdx = session.exercises.length
+    const prevBest = getPrevBest(name)
+    if (prevBest) {
+      setSetForms(prev => ({
+        ...prev,
+        [exIdx]: { weight: String(prevBest.weight), reps: String(prevBest.reps), rpe: String(prevBest.rpe || 7) }
+      }))
+    }
+  }
+
+  const addCardioBlock = () => {
+    setSession(prev => ({
+      ...prev,
+      exercises: [...prev.exercises, {
+        type: 'cardio',
+        name: 'Running',
+        cardio: { type: 'Running', durationMin: '', distanceKm: '', kcal: '', avgHr: '', rpe: '' }
+      }],
+    }))
+  }
+
+  const removeExercise = (idx) => {
+    setSession(prev => ({ ...prev, exercises: prev.exercises.filter((_, i) => i !== idx) }))
+    setSetForms(prev => {
+      const n = {}
+      Object.entries(prev).forEach(([k, v]) => {
+        const ki = parseInt(k)
+        if (ki < idx) n[ki] = v
+        else if (ki > idx) n[ki - 1] = v
+      })
+      return n
+    })
+  }
+
   const updateCardioBlock = (exIdx, field, val) => {
     setSession(prev => ({
       ...prev,
       exercises: prev.exercises.map((ex, i) =>
-        i === exIdx ? { ...ex, name: field === 'type' ? val : ex.name, cardio: { ...ex.cardio, [field]: val, ...(field === 'type' ? { type: val } : {}) } } : ex
+        i === exIdx
+          ? { ...ex, name: field === 'type' ? val : ex.name, cardio: { ...ex.cardio, [field]: val } }
+          : ex
       ),
     }))
   }
 
-  // Get previous best for an exercise from history
   const getPrevBest = (exerciseName) => {
     let best = null
     liftsAll.forEach(l => {
@@ -450,43 +427,28 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
         await addEntry(uid, 'lifts', docData)
       }
 
-      // Build summary for post-save panel
       const strengthExes = session.exercises.filter(ex => ex.type === 'strength' && ex.sets.length > 0)
       const cardioBlocks = session.exercises.filter(ex => ex.type === 'cardio' && ex.cardio?.durationMin)
-      setSavedSummary({
-        exercises: strengthExes,
-        cardioBlocks,
-        totalTonnage,
-        totalCardioKcal,
-        prs,
-        date: session.date,
-      })
+      setSavedSummary({ exercises: strengthExes, cardioBlocks, totalTonnage, totalCardioKcal, prs, date: session.date })
 
       clearDraft(DRAFT_KEY)
       setSession(emptySession())
       setSetForms({})
-      setActiveExIdx(null)
     } finally { setSaving(false) }
   }
 
   const loadTemplate = (t) => {
-    if (t.exercises) {
-      setSession(prev => ({ ...prev, exercises: t.exercises.map(ex => ({ type: 'strength', name: ex.name, sets: ex.sets || [] })) }))
-    } else if (t.exercise) {
-      setSession(prev => ({ ...prev, exercises: [{ type: 'strength', name: t.exercise, sets: t.sets || [] }] }))
-    }
+    const exes = t.exercises
+      ? t.exercises.map(ex => ({ type: 'strength', name: ex.name, sets: ex.sets || [] }))
+      : t.exercise ? [{ type: 'strength', name: t.exercise, sets: t.sets || [] }] : []
+    setSession(prev => ({ ...prev, exercises: exes }))
   }
 
   const startEdit = (lift) => {
     const norm = normaliseLift(lift)
     const exercises = norm.exercises.map(ex => ({ type: 'strength', name: ex.name, sets: ex.sets || [] }))
     const cardioBlocks = (norm.cardioBlocks || []).map(c => ({ type: 'cardio', name: c.type || 'Running', cardio: c }))
-    setSession({
-      date: norm.date,
-      timeOfDay: norm.timeOfDay || null,
-      exercises: [...exercises, ...cardioBlocks],
-      notes: norm.notes || '',
-    })
+    setSession({ date: norm.date, timeOfDay: norm.timeOfDay || null, exercises: [...exercises, ...cardioBlocks], notes: norm.notes || '' })
     setEditId(lift.id)
   }
 
@@ -501,7 +463,7 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
 
   const cancelEdit = () => { setEditId(null); setSession(emptySession()); setSetForms({}) }
 
-  // Session summary after save
+  // ── Post-save summary ──
   if (savedSummary) {
     return (
       <div className="space-y-4">
@@ -541,40 +503,39 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
             )}
           </div>
 
-          {savedSummary.exercises.length > 0 && (
-            <div className="space-y-1 mb-3">
-              {savedSummary.exercises.map((ex, i) => {
-                const bestE1rm = Math.max(...ex.sets.map(s => epley(s.weight, s.reps))).toFixed(1)
-                const tonnage = ex.sets.reduce((a, s) => a + s.weight * s.reps, 0)
-                return (
-                  <div key={i} className="flex items-center justify-between text-sm bg-bg rounded-lg px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <Dumbbell size={12} className="text-accent shrink-0"/>
-                      <span className="font-medium text-text">{ex.name}</span>
-                      {savedSummary.prs.includes(ex.name) && <Trophy size={11} className="text-warn"/>}
-                    </div>
-                    <span className="text-xs text-muted">{ex.sets.length} sets · {tonnage.toFixed(0)} kg · e1RM {bestE1rm}</span>
-                  </div>
-                )
-              })}
-              {savedSummary.cardioBlocks.map((cb, i) => (
-                <div key={`c${i}`} className="flex items-center justify-between text-sm bg-bg rounded-lg px-3 py-2">
+          <div className="space-y-1 mb-3">
+            {savedSummary.exercises.map((ex, i) => {
+              const bestE1rm = Math.max(...ex.sets.map(s => epley(s.weight, s.reps))).toFixed(1)
+              const tonnage = ex.sets.reduce((a, s) => a + s.weight * s.reps, 0)
+              return (
+                <div key={i} className="flex items-center justify-between text-sm bg-bg rounded-lg px-3 py-2">
                   <div className="flex items-center gap-2">
-                    <HeartPulse size={12} className="text-success shrink-0"/>
-                    <span className="font-medium text-text">{cb.cardio?.type || 'Cardio'}</span>
+                    <Dumbbell size={12} className="text-accent shrink-0"/>
+                    <span className="font-medium text-text">{ex.name}</span>
+                    {savedSummary.prs.includes(ex.name) && <Trophy size={11} className="text-warn"/>}
                   </div>
-                  <span className="text-xs text-muted">{cb.cardio?.durationMin} min{cb.cardio?.kcal ? ` · ${cb.cardio.kcal} kcal` : ''}</span>
+                  <span className="text-xs text-muted">{ex.sets.length} sets · {tonnage.toFixed(0)} kg · e1RM {bestE1rm}</span>
                 </div>
-              ))}
-            </div>
-          )}
+              )
+            })}
+            {savedSummary.cardioBlocks.map((cb, i) => (
+              <div key={`c${i}`} className="flex items-center justify-between text-sm bg-bg rounded-lg px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <HeartPulse size={12} className="text-success shrink-0"/>
+                  <span className="font-medium text-text">{cb.cardio?.type || 'Cardio'}</span>
+                </div>
+                <span className="text-xs text-muted">{cb.cardio?.durationMin} min{cb.cardio?.kcal ? ` · ${cb.cardio.kcal} kcal` : ''}</span>
+              </div>
+            ))}
+          </div>
 
-          <button onClick={() => setSavedSummary(null)} className="btn-primary text-sm">Log another session</button>
+          <button onClick={() => setSavedSummary(null)} className="btn-primary">Log another session</button>
         </div>
       </div>
     )
   }
 
+  // ── Main log form ──
   return (
     <div className="space-y-4">
       {draftPrompt && (
@@ -597,7 +558,7 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
 
       {templates.length > 0 && (
         <div className="card">
-          <div className="card-title">Load Template</div>
+          <div className="card-title text-sm">Load Template</div>
           <div className="flex flex-wrap gap-2">
             {templates.map(t => (
               <button key={t.id} onClick={() => loadTemplate(t)} className="btn-secondary text-xs">{t.name}</button>
@@ -607,7 +568,7 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
       )}
 
       <div className="card">
-        <div className="card-title">{editId ? 'Edit Session' : 'Log Session'}</div>
+        {/* Date / time */}
         <div className="grid grid-cols-2 gap-3 mb-4">
           <div>
             <label className="label">Date</label>
@@ -620,185 +581,216 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
           </div>
         </div>
 
-        {/* Exercise / cardio blocks */}
-        {session.exercises.map((ex, exIdx) => {
-          const isOpen = activeExIdx === exIdx
-          const sf = getSetForm(exIdx)
+        {/* Exercise blocks — always fully expanded */}
+        {session.exercises.length > 0 && (
+          <div className="space-y-4 mb-4">
+            {session.exercises.map((ex, exIdx) => {
+              const sf = getSetForm(exIdx)
 
-          if (ex.type === 'cardio') {
-            const cb = ex.cardio || {}
-            return (
-              <div key={exIdx} className="bg-bg rounded-xl mb-3 overflow-hidden border border-border/30">
-                <div className="flex items-center justify-between px-3 py-2 bg-success/10">
-                  <button
-                    className="flex items-center gap-2 text-sm font-medium text-text flex-1 text-left"
-                    onClick={() => setActiveExIdx(isOpen ? null : exIdx)}
-                  >
-                    <HeartPulse size={14} className="text-success shrink-0"/>
-                    <span className="text-success font-semibold">{cb.type || 'Cardio'}</span>
-                    {cb.durationMin && <span className="text-xs text-muted ml-2">{cb.durationMin} min{cb.kcal ? ` · ${cb.kcal} kcal` : ''}</span>}
-                  </button>
-                  <button onClick={() => removeExercise(exIdx)} className="btn-ghost p-1 text-danger"><X size={14}/></button>
-                </div>
-                {isOpen && (
-                  <div className="px-3 py-2 grid grid-cols-2 md:grid-cols-3 gap-2">
-                    <div className="col-span-2 md:col-span-3">
-                      <label className="label text-xs">Type</label>
-                      <select className="input text-sm" value={cb.type || 'Running'} onChange={e => updateCardioBlock(exIdx, 'type', e.target.value)}>
-                        {CARDIO_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="label text-xs">Duration (min) *</label>
-                      <input type="number" className="input text-sm" placeholder="30" value={cb.durationMin || ''} onChange={e => updateCardioBlock(exIdx, 'durationMin', e.target.value)}/>
-                    </div>
-                    <div>
-                      <label className="label text-xs">Distance (km)</label>
-                      <input type="number" step="0.01" className="input text-sm" placeholder="optional" value={cb.distanceKm || ''} onChange={e => updateCardioBlock(exIdx, 'distanceKm', e.target.value)}/>
-                    </div>
-                    <div>
-                      <label className="label text-xs">Kcal burned</label>
-                      <input type="number" className="input text-sm" placeholder="optional" value={cb.kcal || ''} onChange={e => updateCardioBlock(exIdx, 'kcal', e.target.value)}/>
-                    </div>
-                    <div>
-                      <label className="label text-xs">Avg HR</label>
-                      <input type="number" className="input text-sm" placeholder="optional" value={cb.avgHr || ''} onChange={e => updateCardioBlock(exIdx, 'avgHr', e.target.value)}/>
-                    </div>
-                    <div>
-                      <label className="label text-xs">RPE</label>
-                      <input type="number" min="1" max="10" step="0.5" className="input text-sm" placeholder="optional" value={cb.rpe || ''} onChange={e => updateCardioBlock(exIdx, 'rpe', e.target.value)}/>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )
-          }
-
-          // Strength block
-          const bestE1rm = ex.sets.length ? Math.max(...ex.sets.map(s => epley(s.weight, s.reps))).toFixed(1) : null
-          const tonnage = ex.sets.reduce((a, s) => a + s.weight * s.reps, 0)
-          const prevBest = getPrevBest(ex.name)
-
-          return (
-            <div key={exIdx} className="bg-bg rounded-xl mb-3 overflow-hidden border border-border/30">
-              {/* Header — always visible, shows exercise name + summary */}
-              <div className="flex items-center justify-between px-3 py-2 bg-surfaceAlt">
-                <button
-                  className="flex items-center gap-2 text-sm font-medium text-text flex-1 text-left min-w-0"
-                  onClick={() => setActiveExIdx(isOpen ? null : exIdx)}
-                >
-                  <Dumbbell size={14} className="text-accent shrink-0"/>
-                  <span className="truncate font-semibold">{ex.name}</span>
-                  <span className="text-xs text-muted shrink-0 ml-1">
-                    {ex.sets.length > 0
-                      ? `${ex.sets.length} sets · ${tonnage.toFixed(0)} kg · e1RM ${bestE1rm}`
-                      : 'tap to add sets'}
-                  </span>
-                </button>
-                <button onClick={() => removeExercise(exIdx)} className="btn-ghost p-1 text-danger shrink-0"><X size={14}/></button>
-              </div>
-
-              {isOpen && (
-                <div className="px-3 py-2">
-                  {/* Previous best hint */}
-                  {prevBest && (
-                    <div className="text-xs text-muted bg-surfaceAlt/50 rounded-lg px-2 py-1.5 mb-2 flex items-center gap-1">
-                      <Trophy size={11} className="text-warn shrink-0"/>
-                      Previous best: <span className="text-text font-medium ml-1">{prevBest.weight} kg × {prevBest.reps} @ RPE {prevBest.rpe || '?'}</span>
-                      <span className="ml-1">(e1RM {prevBest.e1rm.toFixed(1)}, {prevBest.date})</span>
-                    </div>
-                  )}
-
-                  {ex.sets.length > 0 && (
-                    <div className="space-y-1 mb-3">
-                      <div className="grid grid-cols-5 text-xs text-muted px-1 mb-1">
-                        <span>#</span><span>kg</span><span>Reps</span><span>RPE</span><span>e1RM</span>
+              // ── Cardio block ──
+              if (ex.type === 'cardio') {
+                const cb = ex.cardio || {}
+                return (
+                  <div key={exIdx} className="border border-success/30 rounded-xl overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-2 bg-success/10">
+                      <div className="flex items-center gap-2">
+                        <HeartPulse size={14} className="text-success"/>
+                        <span className="text-sm font-semibold text-success">Cardio</span>
                       </div>
-                      {ex.sets.map((s, si) => (
-                        <div key={si} className="grid grid-cols-5 text-sm items-center px-1 gap-1">
-                          <span className="text-muted">{si + 1}</span>
-                          <span>{s.weight}</span>
-                          <span>{s.reps}</span>
-                          <span>{s.rpe}</span>
-                          <div className="flex items-center gap-1">
-                            <span className="text-accent">{epley(s.weight, s.reps).toFixed(1)}</span>
-                            <button onClick={() => removeSet(exIdx, si)} className="btn-ghost p-0.5 ml-1"><Trash2 size={11}/></button>
-                          </div>
-                        </div>
-                      ))}
-                      {bestE1rm && (
-                        <div className="flex gap-4 text-xs text-muted pt-1 px-1">
-                          <span>Best e1RM: <span className="text-accent">{bestE1rm} kg</span></span>
-                          <span>Tonnage: <span className="text-accent">{tonnage.toFixed(0)} kg</span></span>
-                        </div>
-                      )}
+                      <button onClick={() => removeExercise(exIdx)} className="btn-ghost p-1 text-danger"><X size={14}/></button>
                     </div>
-                  )}
-
-                  <div className="grid grid-cols-3 gap-2 mb-2">
-                    <div>
-                      <label className="label text-xs">Weight (kg)</label>
-                      <input type="number" step="0.5" min="0" className="input text-sm" placeholder="kg"
-                        value={sf.weight} onChange={e => updateSetForm(exIdx, 'weight', e.target.value)}/>
-                    </div>
-                    <div>
-                      <label className="label text-xs">Reps</label>
-                      <input type="number" min="1" max="100" className="input text-sm" placeholder="reps"
-                        value={sf.reps} onChange={e => updateSetForm(exIdx, 'reps', e.target.value)}/>
-                    </div>
-                    <div>
-                      <label className="label text-xs">RPE</label>
-                      <select className="input text-sm" value={sf.rpe}
-                        onChange={e => updateSetForm(exIdx, 'rpe', e.target.value)}>
-                        {RPE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
-                      </select>
+                    <div className="p-3 grid grid-cols-2 md:grid-cols-3 gap-2">
+                      <div className="col-span-2 md:col-span-3">
+                        <label className="label text-xs">Activity</label>
+                        <select className="input" value={cb.type || 'Running'} onChange={e => updateCardioBlock(exIdx, 'type', e.target.value)}>
+                          {CARDIO_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="label text-xs">Duration (min) *</label>
+                        <input type="number" className="input" placeholder="30"
+                          value={cb.durationMin || ''} onChange={e => updateCardioBlock(exIdx, 'durationMin', e.target.value)}/>
+                      </div>
+                      <div>
+                        <label className="label text-xs">Distance (km)</label>
+                        <input type="number" step="0.01" className="input" placeholder="optional"
+                          value={cb.distanceKm || ''} onChange={e => updateCardioBlock(exIdx, 'distanceKm', e.target.value)}/>
+                      </div>
+                      <div>
+                        <label className="label text-xs">Kcal burned</label>
+                        <input type="number" className="input" placeholder="optional"
+                          value={cb.kcal || ''} onChange={e => updateCardioBlock(exIdx, 'kcal', e.target.value)}/>
+                      </div>
+                      <div>
+                        <label className="label text-xs">Avg HR (bpm)</label>
+                        <input type="number" className="input" placeholder="optional"
+                          value={cb.avgHr || ''} onChange={e => updateCardioBlock(exIdx, 'avgHr', e.target.value)}/>
+                      </div>
+                      <div>
+                        <label className="label text-xs">RPE</label>
+                        <input type="number" min="1" max="10" step="0.5" className="input" placeholder="optional"
+                          value={cb.rpe || ''} onChange={e => updateCardioBlock(exIdx, 'rpe', e.target.value)}/>
+                      </div>
                     </div>
                   </div>
-                  <div className="flex gap-2 mb-2">
-                    <button onClick={() => addSet(exIdx)} className="btn-secondary text-xs">
-                      <Plus size={12}/> Add Set
-                    </button>
-                    {ex.sets.length > 0 && (
-                      <button onClick={() => prefillSetForm(exIdx, ex)} className="btn-ghost text-xs text-muted">
-                        Repeat last
-                      </button>
+                )
+              }
+
+              // ── Strength block ──
+              const prevBest = getPrevBest(ex.name)
+              const totalSets = ex.sets.length
+              const tonnage = ex.sets.reduce((a, s) => a + s.weight * s.reps, 0)
+              const bestE1rm = totalSets ? Math.max(...ex.sets.map(s => epley(s.weight, s.reps))) : null
+
+              return (
+                <div key={exIdx} className="border border-border/40 rounded-xl overflow-hidden">
+                  {/* Exercise header */}
+                  <div className="flex items-center justify-between px-3 py-2.5 bg-surfaceAlt">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Dumbbell size={14} className="text-accent shrink-0"/>
+                      <span className="font-semibold text-text truncate">{ex.name}</span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {totalSets > 0 && (
+                        <span className="text-xs text-muted">{totalSets} sets · {tonnage.toFixed(0)} kg</span>
+                      )}
+                      <button onClick={() => removeExercise(exIdx)} className="btn-ghost p-1 text-danger"><X size={14}/></button>
+                    </div>
+                  </div>
+
+                  <div className="p-3">
+                    {/* Previous best */}
+                    {prevBest && (
+                      <div className="flex items-center gap-1.5 text-xs text-muted bg-surfaceAlt/60 rounded-lg px-2.5 py-1.5 mb-3">
+                        <Trophy size={11} className="text-warn shrink-0"/>
+                        <span>Best: <span className="text-text font-medium">{prevBest.weight} kg × {prevBest.reps}</span> @ RPE {prevBest.rpe || '?'} — e1RM <span className="text-accent">{prevBest.e1rm.toFixed(1)}</span> ({prevBest.date})</span>
+                      </div>
                     )}
+
+                    {/* Logged sets table */}
+                    {ex.sets.length > 0 && (
+                      <div className="mb-3">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-xs text-muted">
+                              <th className="text-left pb-1 w-6">#</th>
+                              <th className="text-left pb-1">kg</th>
+                              <th className="text-left pb-1">Reps</th>
+                              <th className="text-left pb-1">RPE</th>
+                              <th className="text-left pb-1">e1RM</th>
+                              <th className="w-6 pb-1"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {ex.sets.map((s, si) => (
+                              <tr key={si} className="border-t border-border/20">
+                                <td className="py-1.5 text-muted text-xs">{si + 1}</td>
+                                <td className="py-1.5 font-medium">{s.weight}</td>
+                                <td className="py-1.5">{s.reps}</td>
+                                <td className="py-1.5 text-muted">{s.rpe}</td>
+                                <td className="py-1.5 text-accent">{epley(s.weight, s.reps).toFixed(1)}</td>
+                                <td className="py-1.5">
+                                  <button onClick={() => removeSet(exIdx, si)} className="btn-ghost p-0.5 text-muted hover:text-danger">
+                                    <Trash2 size={12}/>
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {bestE1rm && (
+                          <div className="flex gap-4 text-xs text-muted pt-2 border-t border-border/20 mt-1">
+                            <span>Best e1RM: <span className="text-accent font-medium">{bestE1rm.toFixed(1)} kg</span></span>
+                            <span>Tonnage: <span className="text-accent font-medium">{tonnage.toFixed(0)} kg</span></span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Add set row — always visible */}
+                    <div className="flex gap-2 items-end">
+                      <div className="flex-1">
+                        <label className="label text-xs">kg</label>
+                        <input
+                          type="number" step="0.5" min="0"
+                          className="input text-center font-medium"
+                          placeholder="0"
+                          value={sf.weight}
+                          onChange={e => updateSetForm(exIdx, 'weight', e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') { document.getElementById(`reps-${exIdx}`)?.focus() } }}
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <label className="label text-xs">Reps</label>
+                        <input
+                          id={`reps-${exIdx}`}
+                          type="number" min="1" max="100"
+                          className="input text-center font-medium"
+                          placeholder="0"
+                          value={sf.reps}
+                          onChange={e => updateSetForm(exIdx, 'reps', e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') addSet(exIdx) }}
+                        />
+                      </div>
+                      <div className="w-20 shrink-0">
+                        <label className="label text-xs">RPE</label>
+                        <select
+                          className="input text-center"
+                          value={sf.rpe}
+                          onChange={e => updateSetForm(exIdx, 'rpe', e.target.value)}
+                        >
+                          {RPE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                      </div>
+                      <button
+                        onClick={() => addSet(exIdx)}
+                        disabled={!sf.weight || !sf.reps}
+                        className="btn-primary shrink-0 flex items-center gap-1 disabled:opacity-40"
+                      >
+                        <Plus size={14}/> Set
+                      </button>
+                    </div>
                   </div>
                 </div>
-              )}
-            </div>
-          )
-        })}
+              )
+            })}
+          </div>
+        )}
 
-        {/* Add exercise picker */}
-        <AddExercisePicker uid={uid} onAdd={addStrengthExercise}/>
+        {/* Add exercise row */}
+        <div className="mb-3">
+          <label className="label">Add exercise</label>
+          <ExercisePicker uid={uid} onAdd={addExercise}/>
+        </div>
 
-        {/* Add cardio block button */}
+        {/* Add cardio block */}
         <button
           onClick={addCardioBlock}
-          className="btn-secondary text-xs flex items-center gap-1 mt-2 w-full justify-center"
+          className="btn-secondary text-sm flex items-center gap-1.5 w-full justify-center mb-4"
         >
-          <HeartPulse size={13}/> Add cardio block
+          <HeartPulse size={14} className="text-success"/> Add cardio block
         </button>
 
-        {/* Notes */}
-        <div className="mt-3 mb-3">
-          <label className="label">Session Notes</label>
+        {/* Session notes */}
+        <div className="mb-4">
+          <label className="label">Session notes</label>
           <div className="flex gap-2">
-            <input type="text" className="input" placeholder="Optional notes"
+            <input type="text" className="input" placeholder="Optional"
               value={session.notes} onChange={e => setSession(p => ({ ...p, notes: e.target.value }))}/>
             <MicButton onTranscript={t => setSession(p => ({ ...p, notes: p.notes ? p.notes + ' ' + t : t }))}/>
           </div>
         </div>
 
+        {/* Save / template */}
         <div className="flex gap-2 flex-wrap">
-          <button onClick={saveSession} className="btn-primary"
-            disabled={saving || (!session.exercises.some(ex => ex.type === 'strength' && ex.sets.length > 0) && !session.exercises.some(ex => ex.type === 'cardio' && ex.cardio?.durationMin))}>
+          <button
+            onClick={saveSession}
+            className="btn-primary"
+            disabled={saving || (!session.exercises.some(ex => ex.type === 'strength' && ex.sets.length > 0) && !session.exercises.some(ex => ex.type === 'cardio' && ex.cardio?.durationMin))}
+          >
             {saving ? 'Saving...' : editId ? 'Update Session' : 'Save Session'}
           </button>
-          {session.exercises.length > 0 && (
-            <SaveTemplateButton uid={uid} session={session}/>
-          )}
+          {session.exercises.length > 0 && <SaveTemplateButton uid={uid} session={session}/>}
         </div>
       </div>
     </div>
@@ -825,7 +817,7 @@ function SaveTemplateButton({ uid, session }) {
   if (!open) return <button onClick={() => setOpen(true)} className="btn-secondary">Save as Template</button>
   return (
     <div className="flex gap-2 items-center">
-      <input className="input w-32" placeholder="Template name" value={name} onChange={e => setName(e.target.value)}/>
+      <input className="input w-36" placeholder="Template name" value={name} onChange={e => setName(e.target.value)}/>
       <button onClick={save} className="btn-primary" disabled={saving}>Save</button>
       <button onClick={() => setOpen(false)} className="btn-ghost">Cancel</button>
     </div>
