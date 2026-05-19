@@ -21,8 +21,8 @@ import Wellbeing from './pages/Wellbeing.jsx'
 import Achievements from './pages/Achievements.jsx'
 import UpdateToast from './components/UpdateToast.jsx'
 
-const tabs = [
-  { to: '/', label: 'Today', icon: Home, end: true },
+export const ALL_TABS = [
+  { to: '/', label: 'Today', icon: Home, end: true, fixed: true },
   { to: '/insights', label: 'Insights', icon: LayoutDashboard },
   { to: '/body', label: 'Body', icon: Ruler },
   { to: '/training', label: 'Training', icon: Dumbbell },
@@ -33,7 +33,7 @@ const tabs = [
   { to: '/photos', label: 'Photos', icon: Camera },
   { to: '/planner', label: 'Planner', icon: ClipboardList },
   { to: '/coach', label: 'Coach', icon: Sparkles },
-  { to: '/settings', label: 'Settings', icon: Settings },
+  { to: '/settings', label: 'Settings', icon: Settings, fixed: true },
 ]
 
 function SyncIndicator() {
@@ -50,6 +50,40 @@ function SyncIndicator() {
     : <CloudOff size={16} className="text-danger" title="Offline"/>
 }
 
+function DynamicNav({ settings }) {
+  const navOrder = settings?.navOrder || ALL_TABS.map(t => t.to)
+  const navHidden = new Set(settings?.navHidden || [])
+  const orderedTabs = [
+    // Always-fixed tabs first in their position
+    ...ALL_TABS.filter(t => t.fixed),
+    ...navOrder
+      .filter(to => !ALL_TABS.find(t => t.to === to)?.fixed)
+      .map(to => ALL_TABS.find(t => t.to === to))
+      .filter(Boolean)
+      .filter(t => !navHidden.has(t.to)),
+  ].reduce((acc, t) => {
+    if (!acc.find(x => x.to === t.to)) acc.push(t)
+    return acc
+  }, [])
+  // Add any tabs not in navOrder that aren't hidden (fallback)
+  ALL_TABS.forEach(t => {
+    if (!orderedTabs.find(x => x.to === t.to) && !navHidden.has(t.to)) {
+      orderedTabs.push(t)
+    }
+  })
+  return (
+    <nav className="max-w-6xl mx-auto px-2 flex gap-1 overflow-x-auto no-scrollbar">
+      {orderedTabs.map(t => (
+        <NavLink key={t.to} to={t.to} end={t.end} className={({isActive}) =>
+          `shrink-0 flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg mb-2 transition-colors ${isActive ? 'bg-accent/15 text-accent' : 'text-muted hover:text-text'}`}>
+          <t.icon size={16} className="md:shrink-0"/>
+          <span>{t.label}</span>
+        </NavLink>
+      ))}
+    </nav>
+  )
+}
+
 export default function App() {
   const { user, loading, signOutUser } = useAuth()
   const { theme, setTheme } = useTheme()
@@ -61,6 +95,14 @@ export default function App() {
     window.addEventListener('offline', handleOffline)
     return () => { window.removeEventListener('online', handleOnline); window.removeEventListener('offline', handleOffline) }
   }, [])
+
+  const [navSettings, setNavSettings] = useState(null)
+  useEffect(() => {
+    if (!user?.uid) return
+    import('./data.js').then(({ getSettings }) => {
+      getSettings(user.uid).then(s => setNavSettings(s))
+    })
+  }, [user?.uid])
 
   if (!isConfigured) return <ConfigMissing />
   if (loading) return <div className="min-h-screen flex items-center justify-center text-muted">Loading…</div>
@@ -91,16 +133,7 @@ export default function App() {
             <button onClick={signOutUser} className="btn-ghost" title="Sign out"><LogOut size={16}/></button>
           </div>
         </div>
-        <nav className="max-w-6xl mx-auto px-2 flex gap-1 overflow-x-auto no-scrollbar">
-          {tabs.map(t => (
-            <NavLink key={t.to} to={t.to} end={t.end} className={({isActive}) =>
-              `shrink-0 flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg mb-2 transition-colors ${isActive ? 'bg-accent/15 text-accent' : 'text-muted hover:text-text'}`}>
-              <t.icon size={16} className="md:shrink-0"/>
-              <span className="hidden md:inline">{t.label}</span>
-              <span className="md:hidden">{t.label}</span>
-            </NavLink>
-          ))}
-        </nav>
+        <DynamicNav settings={navSettings}/>
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-4">

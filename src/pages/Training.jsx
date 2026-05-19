@@ -8,7 +8,7 @@ import {
 import {
   Plus, Trash2, Play, Pause, RotateCcw, Trophy, Pencil, HeartPulse, Dumbbell, X,
   Timer, Activity, Zap, ChevronDown, ChevronRight, CheckCircle, Circle,
-  Copy, ArrowUp, ArrowDown, Save, Settings2, Calendar,
+  Copy, ArrowUp, ArrowDown, Save, Settings2, Calendar, Info, ExternalLink,
 } from 'lucide-react'
 import MicButton from '../components/MicButton.jsx'
 import EditableRow from '../components/EditableRow.jsx'
@@ -86,7 +86,7 @@ function normaliseLift(lift) {
 function Tabs({ active, set }) {
   return (
     <div className="flex gap-2 mb-4 flex-wrap">
-      {['Log', 'Cardio', 'Mobility', 'Programs', 'Templates', 'History', 'Recovery', 'Timer'].map(t => (
+      {['Workout', 'Cardio', 'Mobility', 'Programs', 'Templates', 'History', 'Recovery', 'Timer'].map(t => (
         <button
           key={t}
           onClick={() => set(t)}
@@ -94,6 +94,39 @@ function Tabs({ active, set }) {
         >{t}</button>
       ))}
     </div>
+  )
+}
+
+// ── Exercise Tips tooltip ────────────────────────────────────────────────────
+function ExerciseTips({ exerciseName, allExercises }) {
+  const [open, setOpen] = useState(false)
+  const ex = allExercises.find(e => e.name === exerciseName)
+  if (!ex?.tips && !ex?.url) return null
+  return (
+    <>
+      <button
+        onClick={e => { e.stopPropagation(); setOpen(o => !o) }}
+        className="btn-ghost p-1 text-muted hover:text-accent"
+        title="Exercise tips"
+      >
+        <Info size={13}/>
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-surface border border-border/40 rounded-xl p-3 shadow-lg">
+          <div className="flex items-start justify-between gap-2 mb-2">
+            <span className="text-xs font-semibold text-text">{exerciseName}</span>
+            <button onClick={() => setOpen(false)} className="btn-ghost p-0.5"><X size={12}/></button>
+          </div>
+          {ex.tips && <p className="text-xs text-muted mb-2 leading-relaxed">{ex.tips}</p>}
+          {ex.url && (
+            <a href={ex.url} target="_blank" rel="noopener noreferrer"
+              className="text-xs text-accent flex items-center gap-1 hover:underline">
+              <ExternalLink size={11}/> Full instructions (ExRx.net)
+            </a>
+          )}
+        </div>
+      )}
+    </>
   )
 }
 
@@ -236,6 +269,7 @@ function ExercisePicker({ uid, onAdd }) {
 // ── Log Tab ────────────────────────────────────────────────────────────────────
 function LogTab({ uid, initialEditLift, onEditStart }) {
   const DRAFT_KEY = `pt-draft-training-${uid}`
+  const { all: allExercises } = useExerciseList(uid)
 
   const emptySession = () => ({
     date: today(),
@@ -647,10 +681,11 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
               return (
                 <div key={exIdx} className="border border-border/40 rounded-xl overflow-hidden">
                   {/* Exercise header */}
-                  <div className="flex items-center justify-between px-3 py-2.5 bg-surfaceAlt">
+                  <div className="relative flex items-center justify-between px-3 py-2.5 bg-surfaceAlt">
                     <div className="flex items-center gap-2 min-w-0">
                       <Dumbbell size={14} className="text-accent shrink-0"/>
                       <span className="font-semibold text-text truncate">{ex.name}</span>
+                      <ExerciseTips exerciseName={ex.name} allExercises={allExercises}/>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       {totalSets > 0 && (
@@ -2448,18 +2483,18 @@ function TemplatesTab({ uid }) {
 export default function Training() {
   const { user } = useAuth()
   const uid = user?.uid
-  const [tab, setTab] = useState('Log')
+  const [tab, setTab] = useState('Workout')
   const [editLift, setEditLift] = useState(null)
 
   const handleEditLift = (lift) => {
     setEditLift(lift)
-    setTab('Log')
+    setTab('Workout')
   }
 
   return (
     <div>
       <Tabs active={tab} set={setTab}/>
-      {tab === 'Log' && <LogTab uid={uid} initialEditLift={editLift} onEditStart={() => setEditLift(null)}/>}
+      {tab === 'Workout' && <LogTab uid={uid} initialEditLift={editLift} onEditStart={() => setEditLift(null)}/>}
       {tab === 'Cardio' && <CardioTab uid={uid}/>}
       {tab === 'Mobility' && <MobilityTab uid={uid}/>}
       {tab === 'Programs' && <ProgramsTab uid={uid}/>}

@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../auth.jsx'
-import { subscribe, getAll, getSettings, setEntry } from '../data.js'
+import { subscribe, getAll, getSettings, setEntry, saveSettings } from '../data.js'
 import { format, subDays, addWeeks, startOfWeek } from 'date-fns'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid,
 } from 'recharts'
-import { CheckSquare, Square, TrendingUp, Dumbbell, Droplets, Activity, Target, Heart, Zap, Trophy } from 'lucide-react'
+import { CheckSquare, Square, TrendingUp, Dumbbell, Droplets, Activity, Target, Heart, Zap, Trophy, Settings2, GripVertical, Eye, EyeOff } from 'lucide-react'
 import { flag } from '../clinical/ranges.js'
 import WeightChart, { computeWeeklyRate } from '../components/WeightChart.jsx'
 import ConsistencyHeatmap from '../components/ConsistencyHeatmap.jsx'
@@ -228,229 +228,308 @@ export default function Insights() {
     ...selfCareLog.map(s => ({ date: s.date, type: 'selfcare' })),
   ]
 
+  // ── Card manager state ──
+  const ALL_CARDS = [
+    { id: 'goal',        label: 'Goal Tracker' },
+    { id: 'heatmap',     label: 'Activity Heatmap' },
+    { id: 'weekly',      label: 'Weekly Goals' },
+    { id: 'macros',      label: 'Macros Today' },
+    { id: 'prs',         label: 'Personal Records' },
+    { id: 'bp',          label: 'Blood Pressure' },
+    { id: 'checklist',   label: "Today's Checklist" },
+    { id: 'milestones',  label: 'Program Milestones' },
+  ]
+
+  const rawCardSettings = settings.dashboardCards
+  const cardOrder = rawCardSettings?.order || ALL_CARDS.map(c => c.id)
+  const hiddenCards = new Set(rawCardSettings?.hidden || [])
+
+  const [managing, setManaging] = useState(false)
+  const [localOrder, setLocalOrder] = useState(null)
+  const [localHidden, setLocalHidden] = useState(null)
+  const effectiveOrder = localOrder || cardOrder
+  const effectiveHidden = localHidden || hiddenCards
+
+  const moveCard = (idx, dir) => {
+    const arr = [...effectiveOrder]
+    const swap = idx + dir
+    if (swap < 0 || swap >= arr.length) return
+    ;[arr[idx], arr[swap]] = [arr[swap], arr[idx]]
+    setLocalOrder(arr)
+  }
+
+  const toggleCard = (id) => {
+    const next = new Set(effectiveHidden)
+    next.has(id) ? next.delete(id) : next.add(id)
+    setLocalHidden(next)
+  }
+
+  const saveCardSettings = async () => {
+    await saveSettings(uid, {
+      dashboardCards: { order: effectiveOrder, hidden: [...effectiveHidden] }
+    })
+    setManaging(false)
+    setLocalOrder(null)
+    setLocalHidden(null)
+  }
+
+  const visible = (id) => !effectiveHidden.has(id)
+
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-        {/* Goal Tracker */}
-        {(targetWeightGoal || latestWeight) && (
-          <div className="card md:col-span-2">
-            <div className="card-title flex items-center gap-2"><Target size={16} className="text-accent" />Goal Tracker</div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3 text-sm">
-              {latestWeight && (
-                <div className="bg-bg rounded-xl p-3">
-                  <div className="text-xs text-muted mb-1">Current</div>
-                  <div className="text-accent font-semibold">{latestWeight} kg</div>
-                </div>
-              )}
-              {startWeight && (
-                <div className="bg-bg rounded-xl p-3">
-                  <div className="text-xs text-muted mb-1">Start (90d)</div>
-                  <div className="text-text font-semibold">{parseFloat(startWeight).toFixed(1)} kg</div>
-                </div>
-              )}
-              {targetWeightGoal && (
-                <div className="bg-bg rounded-xl p-3">
-                  <div className="text-xs text-muted mb-1">Target</div>
-                  <div className="text-success font-semibold">{targetWeightGoal} kg</div>
-                </div>
-              )}
-              {projectedETA && (
-                <div className="bg-bg rounded-xl p-3">
-                  <div className="text-xs text-muted mb-1">ETA</div>
-                  <div className="text-text font-semibold">{projectedETA}</div>
-                </div>
-              )}
-            </div>
-            <WeightChart weights={w90} goalSettings={goal} height={180} />
-            {rateStatus && weeklyRate !== null && (
-              <div className={`mt-3 text-xs rounded-lg px-3 py-2 ${rateStatus === 'on' ? 'bg-success/10 text-success'
-                : rateStatus === 'behind' ? 'bg-warn/10 text-warn'
-                  : 'bg-accent/10 text-accent'
-                }`}>
-                Last 7 days: {weeklyRate > 0 ? '+' : ''}{weeklyRate} kg/week
-                {rateKgPerWeek && <> · Target: {goalType === 'lose' ? '-' : '+'}{rateKgPerWeek} kg/week</>}
-                {' '}· {rateStatus === 'on' ? '✅ On track' : rateStatus === 'behind' ? '⚠ Behind target' : '📈 Ahead of target'}
-              </div>
-            )}
+      {/* Card manager header */}
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-muted">Insights</div>
+        {!managing ? (
+          <button onClick={() => setManaging(true)} className="btn-ghost text-xs flex items-center gap-1">
+            <Settings2 size={13}/> Customise
+          </button>
+        ) : (
+          <div className="flex gap-2">
+            <button onClick={saveCardSettings} className="btn-primary text-xs">Save layout</button>
+            <button onClick={() => { setManaging(false); setLocalOrder(null); setLocalHidden(null) }} className="btn-secondary text-xs">Cancel</button>
           </div>
         )}
-
-        {/* Weight trend (fallback if no goal set) */}
-        {!targetWeightGoal && (
-          <div className="card">
-            <div className="card-title flex items-center gap-2"><TrendingUp size={16} className="text-accent" />Weight Trend</div>
-            {w30.length > 1 ? (
-              <WeightChart weights={w30} height={160} />
-            ) : (
-              <p className="text-sm text-muted py-8 text-center">No weight data yet — log your first entry in Body.</p>
-            )}
-          </div>
-        )}
-
-        {/* Consistency Heatmap (spans full width) */}
-        <div className="card md:col-span-2">
-          <div className="card-title flex items-center gap-2">
-            <Zap size={16} className="text-accent" /> Activity Consistency (90 days)
-          </div>
-          <ConsistencyHeatmap entries={heatmapDates} days={90} gymGoal={gymGoal} />
-          <div className="flex flex-wrap gap-3 mt-3 text-xs text-muted">
-            {[
-              { label: 'Gym', color: 'bg-accent' },
-              { label: 'Cardio', color: 'bg-success' },
-              { label: 'Nutrition logged', color: 'bg-warn' },
-              { label: 'Wellbeing', color: 'bg-pink-400' },
-              { label: 'Self-care', color: 'bg-purple-400' },
-            ].map(l => (
-              <span key={l.label} className="flex items-center gap-1">
-                <span className={`inline-block w-2.5 h-2.5 rounded-sm ${l.color}`} />
-                {l.label}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        {/* Weekly Goals – last 4 weeks */}
-        <div className="card md:col-span-2">
-          <div className="card-title flex items-center gap-2">
-            <Heart size={16} className="text-accent" /> Weekly Goals (last 4 weeks)
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-            {weeklyGoalData.map((wk, i) => (
-              <div key={i} className="bg-bg rounded-xl p-3 space-y-2">
-                <div className="text-xs font-semibold text-muted mb-2">{wk.label}</div>
-                <WeekGoalBar label="Gym" actual={wk.gym} goal={gymGoal} colorClass="bg-accent" />
-                <WeekGoalBar label="Cardio" actual={wk.cardio} goal={cardioGoal} colorClass="bg-success" />
-                <WeekGoalBar label="Self-care" actual={wk.selfCare} goal={selfCareGoal} colorClass="bg-purple-400" />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Today's Checklist */}
-        <div className="card">
-          <div className="card-title flex items-center gap-2"><CheckSquare size={16} className="text-accent" />Today's Checklist</div>
-          {todayItems.length === 0 ? (
-            <p className="text-sm text-muted">No items scheduled for today. Add them in Planner.</p>
-          ) : (
-            <ul className="space-y-2">
-              {todayItems.map(item => {
-                const key = `${today}_${item.id}`
-                const done = completions[key]?.done
-                return (
-                  <li key={item.id} className="flex items-center gap-3 cursor-pointer" onClick={() => toggleItem(item)}>
-                    {done ? <CheckSquare size={18} className="text-success shrink-0" /> : <Square size={18} className="text-muted shrink-0" />}
-                    <span className={`text-sm ${done ? 'line-through text-muted' : 'text-text'}`}>{item.title}</span>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </div>
-
-        {/* Macro adherence */}
-        <div className="card">
-          <div className="card-title flex items-center gap-2"><Activity size={16} className="text-accent" />Macros Today</div>
-          <ResponsiveContainer width="100%" height={140}>
-            <BarChart data={macroData} layout="vertical">
-              <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
-              <XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 10 }} />
-              <YAxis type="category" dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }} width={48} />
-              <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', color: '#f1f5f9' }} />
-              <Bar dataKey="actual" name="Actual" fill="#22d3ee" radius={[0, 4, 4, 0]} />
-              <Bar dataKey="target" name="Target" fill="#334155" radius={[0, 4, 4, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Personal Records */}
-        <div className="card">
-          <div className="card-title flex items-center gap-2"><Dumbbell size={16} className="text-accent" />Personal Records</div>
-          {Object.keys(allPRs).length === 0 ? (
-            <p className="text-sm text-muted">No lifts logged yet. Head to Training.</p>
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-              {Object.entries(allPRs).map(([ex, e1rm]) => (
-                <div key={ex} className="bg-bg rounded-xl p-3 text-center">
-                  <div className="text-xs text-muted mb-1">{ex.split(' ').slice(0, 2).join(' ')}</div>
-                  <div className="text-base font-semibold text-accent">{e1rm}</div>
-                  <div className="text-xs text-muted">kg e1RM</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Latest BP */}
-        <div className="card">
-          <div className="card-title flex items-center gap-2"><Droplets size={16} className="text-accent" />Blood Pressure</div>
-          {latestBP ? (
-            <>
-              <div className="flex gap-3 mb-3">
-                <span className="text-2xl font-bold text-accent">{latestBP.systolic}</span>
-                <span className="text-2xl text-muted">/</span>
-                <span className="text-2xl font-bold text-text">{latestBP.diastolic}</span>
-                <span className="text-sm text-muted self-end mb-1">mmHg</span>
-                {latestBP.hr && <span className="text-sm text-muted self-end mb-1">• {latestBP.hr} bpm</span>}
-              </div>
-              {bpTrend.length > 1 && (
-                <ResponsiveContainer width="100%" height={80}>
-                  <LineChart data={bpTrend}>
-                    <Line type="monotone" dataKey="s" stroke="#22d3ee" dot={false} strokeWidth={1.5} />
-                    <Line type="monotone" dataKey="d" stroke="#94a3b8" dot={false} strokeWidth={1.5} />
-                    <XAxis dataKey="date" hide />
-                    <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', color: '#f1f5f9' }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
-            </>
-          ) : (
-            <p className="text-sm text-muted">No BP readings yet. Log in Bloods.</p>
-          )}
-        </div>
-
-        {/* Latest HbA1c */}
-        <div className="card">
-          <div className="card-title">Latest HbA1c</div>
-          {latestHba1c ? (
-            <div className="flex items-center gap-3">
-              <FlagChip name="hba1c" value={latestHba1c.hba1c} sex={settings.sex} />
-              <span className="text-sm text-muted">mmol/mol · {latestHba1c.date}</span>
-            </div>
-          ) : (
-            <p className="text-sm text-muted">No HbA1c logged yet.</p>
-          )}
-        </div>
-
       </div>
 
-      {/* Program Milestones */}
-      {settings.activeProgram && (() => {
-        const prog = getProgramById(settings.activeProgram.id)
-        if (!prog?.milestones?.length) return null
-        const exerciseMilestones = prog.milestones.filter(m => m.exercise)
-        if (!exerciseMilestones.length) return null
-        return (
-          <div className="card">
-            <div className="card-title flex items-center gap-2">
-              <Trophy size={16} className="text-warn"/> Program Milestones — {prog.name}
-            </div>
-            {exerciseMilestones.map(m => {
-              const { hit, progress, currentKg, targetKg } = computeMilestoneProgressDash(m, lifts, weights)
+      {/* Card manager panel */}
+      {managing && (
+        <div className="card">
+          <div className="card-title flex items-center gap-2"><Settings2 size={15} className="text-accent"/> Customise Insights</div>
+          <p className="text-xs text-muted mb-3">Show/hide cards and drag to reorder. Changes save when you tap "Save layout".</p>
+          <div className="space-y-2">
+            {effectiveOrder.map((id, idx) => {
+              const card = ALL_CARDS.find(c => c.id === id)
+              if (!card) return null
+              const hidden = effectiveHidden.has(id)
               return (
-                <MilestoneRow
-                  key={m.id}
-                  milestone={m}
-                  progress={progress}
-                  hit={hit}
-                  currentKg={currentKg}
-                  targetKg={targetKg}
-                />
+                <div key={id} className={`flex items-center gap-2 bg-surfaceAlt rounded-xl px-3 py-2.5 ${hidden ? 'opacity-50' : ''}`}>
+                  <GripVertical size={14} className="text-muted shrink-0"/>
+                  <span className="text-sm text-text flex-1">{card.label}</span>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => moveCard(idx, -1)} disabled={idx === 0} className="btn-ghost p-0.5 disabled:opacity-30">↑</button>
+                    <button onClick={() => moveCard(idx, 1)} disabled={idx === effectiveOrder.length - 1} className="btn-ghost p-0.5 disabled:opacity-30">↓</button>
+                    <button onClick={() => toggleCard(id)} className={`btn-ghost p-1 ml-1 ${hidden ? 'text-muted' : 'text-accent'}`}>
+                      {hidden ? <EyeOff size={14}/> : <Eye size={14}/>}
+                    </button>
+                  </div>
+                </div>
               )
             })}
           </div>
+        </div>
+      )}
+
+      {/* Render cards in order */}
+      {effectiveOrder.map(id => {
+        if (effectiveHidden.has(id)) return null
+
+        if (id === 'goal') return (
+          <div key="goal">
+            {(targetWeightGoal || latestWeight) && (
+              <div className="card">
+                <div className="card-title flex items-center gap-2"><Target size={16} className="text-accent" />Goal Tracker</div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3 text-sm">
+                  {latestWeight && (
+                    <div className="bg-bg rounded-xl p-3">
+                      <div className="text-xs text-muted mb-1">Current</div>
+                      <div className="text-accent font-semibold">{latestWeight} kg</div>
+                    </div>
+                  )}
+                  {startWeight && (
+                    <div className="bg-bg rounded-xl p-3">
+                      <div className="text-xs text-muted mb-1">Start (90d)</div>
+                      <div className="text-text font-semibold">{parseFloat(startWeight).toFixed(1)} kg</div>
+                    </div>
+                  )}
+                  {targetWeightGoal && (
+                    <div className="bg-bg rounded-xl p-3">
+                      <div className="text-xs text-muted mb-1">Target</div>
+                      <div className="text-success font-semibold">{targetWeightGoal} kg</div>
+                    </div>
+                  )}
+                  {projectedETA && (
+                    <div className="bg-bg rounded-xl p-3">
+                      <div className="text-xs text-muted mb-1">ETA</div>
+                      <div className="text-text font-semibold">{projectedETA}</div>
+                    </div>
+                  )}
+                </div>
+                <WeightChart weights={w90} goalSettings={goal} height={180} />
+                {rateStatus && weeklyRate !== null && (
+                  <div className={`mt-3 text-xs rounded-lg px-3 py-2 ${rateStatus === 'on' ? 'bg-success/10 text-success' : rateStatus === 'behind' ? 'bg-warn/10 text-warn' : 'bg-accent/10 text-accent'}`}>
+                    Last 7 days: {weeklyRate > 0 ? '+' : ''}{weeklyRate} kg/week
+                    {rateKgPerWeek && <> · Target: {goalType === 'lose' ? '-' : '+'}{rateKgPerWeek} kg/week</>}
+                    {' '}· {rateStatus === 'on' ? '✅ On track' : rateStatus === 'behind' ? '⚠ Behind target' : '📈 Ahead of target'}
+                  </div>
+                )}
+                {!targetWeightGoal && w30.length > 1 && (
+                  <>
+                    <div className="card-title flex items-center gap-2 mt-3"><TrendingUp size={16} className="text-accent" />Weight Trend</div>
+                    <WeightChart weights={w30} height={160} />
+                  </>
+                )}
+              </div>
+            )}
+            {!targetWeightGoal && !latestWeight && (
+              <div className="card">
+                <div className="card-title flex items-center gap-2"><TrendingUp size={16} className="text-accent" />Weight Trend</div>
+                <p className="text-sm text-muted py-6 text-center">No weight data yet — log your first entry in Body.</p>
+              </div>
+            )}
+          </div>
         )
-      })()}
+
+        if (id === 'heatmap') return (
+          <div key="heatmap" className="card">
+            <div className="card-title flex items-center gap-2">
+              <Zap size={16} className="text-accent" /> Activity Consistency (90 days)
+            </div>
+            <ConsistencyHeatmap entries={heatmapDates} days={90} gymGoal={gymGoal} />
+            <div className="flex flex-wrap gap-3 mt-3 text-xs text-muted">
+              {[
+                { label: 'Gym', color: 'bg-accent' },
+                { label: 'Cardio', color: 'bg-success' },
+                { label: 'Nutrition logged', color: 'bg-warn' },
+                { label: 'Wellbeing', color: 'bg-pink-400' },
+                { label: 'Self-care', color: 'bg-purple-400' },
+              ].map(l => (
+                <span key={l.label} className="flex items-center gap-1">
+                  <span className={`inline-block w-2.5 h-2.5 rounded-sm ${l.color}`} />
+                  {l.label}
+                </span>
+              ))}
+            </div>
+          </div>
+        )
+
+        if (id === 'weekly') return (
+          <div key="weekly" className="card">
+            <div className="card-title flex items-center gap-2">
+              <Heart size={16} className="text-accent" /> Weekly Goals (last 4 weeks)
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+              {weeklyGoalData.map((wk, i) => (
+                <div key={i} className="bg-bg rounded-xl p-3 space-y-2">
+                  <div className="text-xs font-semibold text-muted mb-2">{wk.label}</div>
+                  <WeekGoalBar label="Gym" actual={wk.gym} goal={gymGoal} colorClass="bg-accent" />
+                  <WeekGoalBar label="Cardio" actual={wk.cardio} goal={cardioGoal} colorClass="bg-success" />
+                  <WeekGoalBar label="Self-care" actual={wk.selfCare} goal={selfCareGoal} colorClass="bg-purple-400" />
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+
+        if (id === 'macros') return (
+          <div key="macros" className="card">
+            <div className="card-title flex items-center gap-2"><Activity size={16} className="text-accent" />Macros Today</div>
+            <ResponsiveContainer width="100%" height={140}>
+              <BarChart data={macroData} layout="vertical">
+                <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
+                <XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                <YAxis type="category" dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }} width={48} />
+                <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', color: '#f1f5f9' }} />
+                <Bar dataKey="actual" name="Actual" fill="#22d3ee" radius={[0, 4, 4, 0]} />
+                <Bar dataKey="target" name="Target" fill="#334155" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )
+
+        if (id === 'prs') return (
+          <div key="prs" className="card">
+            <div className="card-title flex items-center gap-2"><Dumbbell size={16} className="text-accent" />Personal Records</div>
+            {Object.keys(allPRs).length === 0 ? (
+              <p className="text-sm text-muted">No lifts logged yet. Head to Training.</p>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                {Object.entries(allPRs).map(([ex, e1rm]) => (
+                  <div key={ex} className="bg-bg rounded-xl p-3 text-center">
+                    <div className="text-xs text-muted mb-1">{ex.split(' ').slice(0, 2).join(' ')}</div>
+                    <div className="text-base font-semibold text-accent">{e1rm}</div>
+                    <div className="text-xs text-muted">kg e1RM</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+
+        if (id === 'bp') return (
+          <div key="bp" className="card">
+            <div className="card-title flex items-center gap-2"><Droplets size={16} className="text-accent" />Blood Pressure</div>
+            {latestBP ? (
+              <>
+                <div className="flex gap-3 mb-3">
+                  <span className="text-2xl font-bold text-accent">{latestBP.systolic}</span>
+                  <span className="text-2xl text-muted">/</span>
+                  <span className="text-2xl font-bold text-text">{latestBP.diastolic}</span>
+                  <span className="text-sm text-muted self-end mb-1">mmHg</span>
+                  {latestBP.hr && <span className="text-sm text-muted self-end mb-1">· {latestBP.hr} bpm</span>}
+                </div>
+                {bpTrend.length > 1 && (
+                  <ResponsiveContainer width="100%" height={80}>
+                    <LineChart data={bpTrend}>
+                      <Line type="monotone" dataKey="s" stroke="#22d3ee" dot={false} strokeWidth={1.5} />
+                      <Line type="monotone" dataKey="d" stroke="#94a3b8" dot={false} strokeWidth={1.5} />
+                      <XAxis dataKey="date" hide />
+                      <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', color: '#f1f5f9' }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-muted">No BP readings yet. Log in Bloods.</p>
+            )}
+          </div>
+        )
+
+        if (id === 'checklist') return (
+          <div key="checklist" className="card">
+            <div className="card-title flex items-center gap-2"><CheckSquare size={16} className="text-accent" />Today's Checklist</div>
+            {todayItems.length === 0 ? (
+              <p className="text-sm text-muted">No items scheduled for today. Add them in Planner.</p>
+            ) : (
+              <ul className="space-y-2">
+                {todayItems.map(item => {
+                  const key = `${today}_${item.id}`
+                  const done = completions[key]?.done
+                  return (
+                    <li key={item.id} className="flex items-center gap-3 cursor-pointer" onClick={() => toggleItem(item)}>
+                      {done ? <CheckSquare size={18} className="text-success shrink-0" /> : <Square size={18} className="text-muted shrink-0" />}
+                      <span className={`text-sm ${done ? 'line-through text-muted' : 'text-text'}`}>{item.title}</span>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        )
+
+        if (id === 'milestones') {
+          const prog = settings.activeProgram ? getProgramById(settings.activeProgram.id) : null
+          if (!prog?.milestones?.length) return null
+          const exerciseMilestones = prog.milestones.filter(m => m.exercise)
+          if (!exerciseMilestones.length) return null
+          return (
+            <div key="milestones" className="card">
+              <div className="card-title flex items-center gap-2">
+                <Trophy size={16} className="text-warn"/> Program Milestones — {prog.name}
+              </div>
+              {exerciseMilestones.map(m => {
+                const { hit, progress, currentKg, targetKg } = computeMilestoneProgressDash(m, lifts, weights)
+                return (
+                  <MilestoneRow key={m.id} milestone={m} progress={progress} hit={hit} currentKg={currentKg} targetKg={targetKg}/>
+                )
+              })}
+            </div>
+          )
+        }
+
+        return null
+      })}
 
     </div>
   )

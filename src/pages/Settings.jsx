@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
 import { getSettings, saveSettings, getAll, addEntry, deleteEntry, setEntry } from '../data.js'
-import { Download, LogOut, Save, CloudUpload, Bell, BellOff, Database, Award, X, Plus, Trash2, Pencil, Dumbbell, Activity, Zap } from 'lucide-react'
+import { Download, LogOut, Save, CloudUpload, Bell, BellOff, Database, Award, X, Plus, Trash2, Pencil, Dumbbell, Activity, Zap, BookOpen, GripVertical, Eye, EyeOff, ArrowUp, ArrowDown } from 'lucide-react'
 import { requestNotificationPermission } from '../lib/messaging.js'
 import { backupToDrive } from '../lib/drive.js'
 import { resolveProgram, computeWeekNumber } from '../training/programs.js'
@@ -411,6 +411,12 @@ export default function Settings() {
         )}
       </Section>
 
+      {/* Nav customisation */}
+      <NavCustomSection uid={uid}/>
+
+      {/* User guide */}
+      <UserGuideSection/>
+
       <Section title="Account">
         <p className="text-sm text-muted mb-3">Signed in as <span className="text-text">{user?.email || user?.displayName}</span></p>
         <button onClick={signOutUser} className="btn-danger">
@@ -564,6 +570,228 @@ function CustomExercisesSection({ uid }) {
                   </button>
                 </>
               )}
+            </div>
+          ))}
+        </div>
+      )}
+    </Section>
+  )
+}
+
+// ── Nav Customisation Section ───────────────────────────────────────────────────
+function NavCustomSection({ uid }) {
+  const [settings, setSettings] = useState(null)
+  const [order, setOrder] = useState(null)
+  const [hidden, setHidden] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => { getSettings(uid).then(setSettings) }, [uid])
+
+  if (!settings) return null
+
+  // Nav tabs list (mirrors App.jsx ALL_TABS)
+  const NAV_TABS = [
+    { to: '/', label: 'Today', fixed: true },
+    { to: '/insights', label: 'Insights' },
+    { to: '/body', label: 'Body' },
+    { to: '/training', label: 'Training' },
+    { to: '/nutrition', label: 'Nutrition' },
+    { to: '/bloods', label: 'Bloods' },
+    { to: '/wellbeing', label: 'Wellbeing' },
+    { to: '/meds', label: 'Meds' },
+    { to: '/photos', label: 'Photos' },
+    { to: '/planner', label: 'Planner' },
+    { to: '/coach', label: 'Coach' },
+    { to: '/settings', label: 'Settings', fixed: true },
+  ]
+
+  const rawOrder = order || settings.navOrder || NAV_TABS.map(t => t.to)
+  const rawHidden = hidden || new Set(settings.navHidden || [])
+  const moveable = NAV_TABS.filter(t => !t.fixed)
+
+  const moveTab = (to, dir) => {
+    const arr = [...rawOrder.filter(x => !NAV_TABS.find(t => t.to === x)?.fixed)]
+    const idx = arr.indexOf(to)
+    if (idx === -1) return
+    const swap = idx + dir
+    if (swap < 0 || swap >= arr.length) return
+    ;[arr[idx], arr[swap]] = [arr[swap], arr[idx]]
+    setOrder([
+      '/', // Today always first
+      ...arr,
+      '/settings', // Settings always last
+    ])
+  }
+
+  const toggleHide = (to) => {
+    const next = new Set(rawHidden)
+    next.has(to) ? next.delete(to) : next.add(to)
+    setHidden(next)
+  }
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await saveSettings(uid, {
+        navOrder: rawOrder,
+        navHidden: [...rawHidden],
+      })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } finally { setSaving(false) }
+  }
+
+  const orderedMoveable = rawOrder
+    .map(to => moveable.find(t => t.to === to))
+    .filter(Boolean)
+  // Add any not in order
+  moveable.forEach(t => { if (!orderedMoveable.find(x => x.to === t.to)) orderedMoveable.push(t) })
+
+  return (
+    <Section title="Navigation Bar">
+      <p className="text-sm text-muted mb-3">Show, hide, and reorder tabs in the navigation bar. Today and Settings are always shown.</p>
+      <div className="space-y-2 mb-3">
+        {orderedMoveable.map((tab, idx) => {
+          const isHidden = rawHidden.has(tab.to)
+          return (
+            <div key={tab.to} className={`flex items-center gap-2 bg-surfaceAlt rounded-xl px-3 py-2.5 ${isHidden ? 'opacity-50' : ''}`}>
+              <GripVertical size={14} className="text-muted shrink-0"/>
+              <span className="text-sm text-text flex-1">{tab.label}</span>
+              <div className="flex items-center gap-1">
+                <button onClick={() => moveTab(tab.to, -1)} disabled={idx === 0} className="btn-ghost p-0.5 disabled:opacity-30 text-xs">
+                  <ArrowUp size={12}/>
+                </button>
+                <button onClick={() => moveTab(tab.to, 1)} disabled={idx === orderedMoveable.length - 1} className="btn-ghost p-0.5 disabled:opacity-30 text-xs">
+                  <ArrowDown size={12}/>
+                </button>
+                <button onClick={() => toggleHide(tab.to)} className={`btn-ghost p-1 ml-1 ${isHidden ? 'text-muted' : 'text-accent'}`}>
+                  {isHidden ? <EyeOff size={14}/> : <Eye size={14}/>}
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <button onClick={save} className="btn-primary text-sm flex items-center gap-2" disabled={saving}>
+        <Save size={14}/> {saved ? 'Saved!' : saving ? 'Saving...' : 'Save nav order'}
+      </button>
+    </Section>
+  )
+}
+
+// ── User Guide Section ───────────────────────────────────────────────────────────
+function UserGuideSection() {
+  const [open, setOpen] = useState(false)
+
+  const GUIDE = [
+    {
+      title: 'Getting started',
+      content: `1. Set your profile in Settings → Profile (name, weight, body fat %, sex). This drives macro calculations.
+2. Calculate your macros in Nutrition → Macros — enter your weight, body fat %, activity level, and goal. Save the result as your targets.
+3. Set your activity goals in Settings → Activity Goals (gym sessions/week, cardio sessions/week).
+4. Log your first weight in Today → Quick Weight Log or in Body → Weight.`,
+    },
+    {
+      title: 'Daily use',
+      content: `Today page is your dashboard. Each day:
+• Log your weight first thing in the morning (fasted = most consistent).
+• Log meals in Nutrition → Today as you eat. Use barcode scan for packaged food.
+• After training, go to Training → Workout and log your session. Add exercises from the dropdown, log sets with weight, reps, and RPE.
+• Log mood/energy/sleep in Wellbeing → Log at the end of the day.`,
+    },
+    {
+      title: 'Training log',
+      content: `Training → Workout: the main session logger.
+• Pick exercises from the dropdown (grouped by type). Tap "+ New" to create a custom exercise.
+• The ⓘ info button next to each exercise shows coaching cues and links to ExRx for full instructions.
+• Weight carries over between sets — just change reps. Tick "Warm-up" to exclude a set from PR/tonnage calculations.
+• Add a cardio block within the same session (e.g. 20 min bike after lifting).
+• Session RPE: rate overall effort 1–10 before saving.
+• History groups sessions by month. The All-Time PRs card shows your best e1RM per exercise.`,
+    },
+    {
+      title: 'Programs',
+      content: `Training → Programs: structured workout plans.
+• 4 built-in programs: Stronglifts 5×5, PPL, 5/3/1 BBB, Hybrid.
+• Create your own in the Programs tab → New program. Name your workout days, pick exercises, set the weekly schedule.
+• Fork any built-in program with "Fork & customise" to edit a copy.
+• When a program is active, Today page shows today's scheduled workout.
+• Toggle between Fixed days mode (Mon=slot1 etc.) and Sequential mode (next workout whenever you train).`,
+    },
+    {
+      title: 'Nutrition',
+      content: `Nutrition → Today: log meals. Fields: name, kcal, protein, carbs, fat, fibre.
+• Barcode scanner: tap the scan button to scan packaged food. Tick "Save as template" to reuse it.
+• Quick Log: saved meal templates appear as one-tap chips. Frequently logged meals appear at the top.
+• Copy yesterday: one tap to copy all of yesterday's meals to today.
+• Net kcal mode: toggle on when you've logged cardio kcal — subtracts burn from shown total.
+• Nutrition → Macros: goal-driven calculator using Katch-McArdle formula. Set your targets here.`,
+    },
+    {
+      title: 'Wellbeing',
+      content: `Wellbeing → Log: rate mood, energy, sleep quality (1–5), and stress. Log sleep hours separately.
+• Symptoms: tap to select from a preset list (nausea, fatigue, etc.).
+• Wellbeing → Trends: view individual metrics over time, or tap "All" for a multi-line overlay.
+• Insights panel: auto-generated correlations — e.g. sleep hours vs energy score.`,
+    },
+    {
+      title: 'Blood results',
+      content: `Bloods: log 18 blood markers grouped by category (BP, lipids, liver, haematology, glucose, renal).
+• Flag chips (✓ / ! / ✗) show whether each value is within UK reference ranges.
+• Trends tab: plot any marker over time with reference lines shown on the chart.
+• Delta indicators (↑↓) in history show change vs previous reading.
+• Any "bad" flagged values surface on the Today page as a reminder.`,
+    },
+    {
+      title: 'Medications',
+      content: `Medications: track prescribed meds with dosing schedule (daily, weekly, specific days, as-needed).
+• Mark doses taken from the Today checklist or the Medications list.
+• Stat dose: log one-off doses (e.g. paracetamol) without affecting any schedule.
+• Catch-up: log a late dose without shifting future scheduled dates.
+• PK levels chart: plots estimated drug concentration over time using first-order pharmacokinetics. Requires half-life in hours (enter when adding the medication).
+• Adherence % shown per medication (last 30 days).`,
+    },
+    {
+      title: 'Body & Photos',
+      content: `Body → Weight: log daily weight + body fat %. Lean body mass (LBM) is computed and shown as a dashed green line — useful for tracking body recomp when total weight stays stable.
+Body → Measurements: log circumference measurements in cm (waist, chest, arms, thighs, neck, hips).
+Photos: upload progress photos tagged as front/side/back. Timeline view shows photos chronologically with weight overlay. Compare: full-screen swipe between before and after.`,
+    },
+    {
+      title: 'Insights page',
+      content: `Insights shows your key metrics at a glance. Tap "Customise" to show/hide cards and change their order — saved to your account.
+Activity Consistency: 90-day heatmap. Colour = activity type (gym=cyan, cardio=green, food=amber). Small dot below each week = gym goal hit that week.`,
+    },
+    {
+      title: 'AI Coach',
+      content: `Coach: chat with Gemini 2.5 Flash. The coach is pre-loaded with a summary of your current data (weight, goal, recent training, macro targets) so advice is personalised.
+Add your Gemini API key in Settings → Gemini API Key. Free tier available at aistudio.google.com/app/apikey.
+The coach will not provide advice on performance-enhancing drugs.`,
+    },
+    {
+      title: 'Settings & customisation',
+      content: `Settings → Profile: name, weight, body fat %, sex (used for blood reference ranges).
+Settings → Navigation Bar: reorder and hide tabs to suit your workflow.
+Settings → Insights: customise which cards appear on the Insights page.
+Settings → Activity Goals: gym/cardio/self-care sessions per week (used for rings on Today + charts in Insights).
+Settings → Data Export: download all your data as CSV files.
+Settings → Google Drive Backup: backs up all data as a JSON file to your Drive.`,
+    },
+  ]
+
+  return (
+    <Section title="User Guide">
+      <p className="text-sm text-muted mb-3">A comprehensive guide to every feature in Physique Tracker.</p>
+      <button onClick={() => setOpen(o => !o)} className="btn-secondary flex items-center gap-2 mb-3">
+        <BookOpen size={14}/> {open ? 'Hide guide' : 'Show user guide'}
+      </button>
+      {open && (
+        <div className="space-y-4">
+          {GUIDE.map(section => (
+            <div key={section.title} className="bg-surfaceAlt rounded-xl p-4">
+              <div className="text-sm font-semibold text-accent mb-2">{section.title}</div>
+              <p className="text-xs text-muted whitespace-pre-line leading-relaxed">{section.content}</p>
             </div>
           ))}
         </div>
