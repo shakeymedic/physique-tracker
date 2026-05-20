@@ -396,23 +396,9 @@ export default function Insights() {
         if (id === 'heatmap') return (
           <div key="heatmap" className="card">
             <div className="card-title flex items-center gap-2">
-              <Zap size={16} className="text-accent" /> Activity Consistency (90 days)
+              <Zap size={16} className="text-accent" /> Activity Consistency (12 weeks)
             </div>
-            <ConsistencyHeatmap entries={heatmapDates} days={90} gymGoal={gymGoal} />
-            <div className="flex flex-wrap gap-3 mt-3 text-xs text-muted">
-              {[
-                { label: 'Gym', color: 'bg-accent' },
-                { label: 'Cardio', color: 'bg-success' },
-                { label: 'Nutrition logged', color: 'bg-warn' },
-                { label: 'Wellbeing', color: 'bg-pink-400' },
-                { label: 'Self-care', color: 'bg-purple-400' },
-              ].map(l => (
-                <span key={l.label} className="flex items-center gap-1">
-                  <span className={`inline-block w-2.5 h-2.5 rounded-sm ${l.color}`} />
-                  {l.label}
-                </span>
-              ))}
-            </div>
+            <ConsistencyHeatmap entries={heatmapDates} weeks={12} gymGoal={gymGoal} />
 
             {/* Achievement badges summary */}
             <div className="mt-4 pt-4 border-t border-border/20">
