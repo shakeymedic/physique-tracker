@@ -1,10 +1,13 @@
 /**
  * MilestoneRow — shows a single milestone with progress bar.
+ * Handles both lift-based (kg) and count-based (sessions/days) milestones.
  */
 import { Trophy, CheckCircle } from 'lucide-react'
 
 export default function MilestoneRow({ milestone, progress = 0, hit = false, hitDate = null, currentKg = null, targetKg = null }) {
   const pct = Math.min(100, Math.round(progress * 100))
+  const isCount = milestone.type === 'cardio-count' || milestone.type === 'mobility-streak'
+  const unit = milestone.type === 'cardio-count' ? 'sessions' : milestone.type === 'mobility-streak' ? 'sessions' : 'kg'
 
   return (
     <div className={`rounded-xl p-3 mb-2 ${hit ? 'bg-warn/10 border border-warn/20' : 'bg-surfaceAlt'}`}>
@@ -34,8 +37,11 @@ export default function MilestoneRow({ milestone, progress = 0, hit = false, hit
 
       {!hit && currentKg !== null && targetKg !== null && (
         <div className="text-xs text-muted">
-          Current: <span className="text-accent">{currentKg.toFixed(1)} kg</span>
-          {' '}· Target: <span className="text-text">{targetKg.toFixed(1)} kg</span>
+          {isCount ? (
+            <>Current: <span className="text-accent">{Math.round(currentKg)} {unit}</span> · Target: <span className="text-text">{Math.round(targetKg)}</span></>
+          ) : (
+            <>Current: <span className="text-accent">{parseFloat(currentKg).toFixed(1)} kg</span> · Target: <span className="text-text">{parseFloat(targetKg).toFixed(1)} kg</span></>
+          )}
         </div>
       )}
     </div>

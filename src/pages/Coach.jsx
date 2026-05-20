@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useAuth } from '../auth.jsx'
-import { getAll, getSettings } from '../data.js'
+import { getAll, getSettings, addEntry, setEntry, deleteEntry, subscribe } from '../data.js'
 import { Sparkles, Send, ExternalLink } from 'lucide-react'
 
 const SYSTEM_PREAMBLE = "You are an evidence-based fitness and nutrition coach. The user is tracking weight, training, macros and routine bloods. Provide practical, conservative advice. Decline anything outside legitimate, prescribed medical or routine fitness/nutrition guidance — and never advise on anabolic or performance-enhancing drugs."
@@ -19,6 +19,12 @@ export default function Coach() {
   useEffect(() => {
     if (!uid) return
     getSettings(uid).then(setSettings)
+    // Load persisted chat history
+    getAll(uid, 'coachHistory', { orderByField: 'createdAt', dir: 'asc' }).then(docs => {
+      if (docs.length > 0) {
+        setMessages(docs.slice(-20).map(d => ({ role: d.role, text: d.text, isError: d.isError || false })))
+      }
+    })
   }, [uid])
 
   useEffect(() => {
@@ -95,7 +101,21 @@ export default function Coach() {
       }
       const data = await res.json()
       const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text || '(no response)'
-      setMessages(prev => [...prev, { role: 'model', text: reply }])
+      setMessages(prev => {
+        const next = [...prev, { role: 'model', text: reply }]
+        // Persist last 20 messages — fire and forget
+        ;(async () => {
+          try {
+            const existing = await getAll(uid, 'coachHistory', { orderByField: 'createdAt', dir: 'asc' })
+            // Keep only last 18 + new pair = 20 total
+            const toDelete = existing.slice(0, Math.max(0, existing.length - 18))
+            for (const d of toDelete) await deleteEntry(uid, 'coachHistory', d.id)
+            await addEntry(uid, 'coachHistory', { role: 'user', text: userMsg })
+            await addEntry(uid, 'coachHistory', { role: 'model', text: reply })
+          } catch (e) { /* non-blocking */ }
+        })()
+        return next
+      })
     } catch (e) {
       setError(e.message)
       setMessages(prev => [...prev, { role: 'model', text: `Error: ${e.message}`, isError: true }])
@@ -153,10 +173,26 @@ export default function Coach() {
       {/* Chat history */}
       <div className="flex-1 overflow-y-auto space-y-3 mb-3">
         {messages.length === 0 && (
-          <div className="text-center pt-8">
-            <Sparkles size={32} className="text-accent/40 mx-auto mb-3"/>
-            <p className="text-sm text-muted">Ask me anything about training, nutrition, recovery or understanding your health data.</p>
-            <p className="text-xs text-muted mt-1">I'll give evidence-based, conservative guidance within fitness and nutrition.</p>
+          <div className="pt-6 pb-2">
+            <div className="text-center mb-4">
+              <Sparkles size={32} className="text-accent/40 mx-auto mb-3"/>
+              <p className="text-sm text-muted">Evidence-based fitness and nutrition coaching, personalised to your data.</p>
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs text-muted text-center mb-2">Try asking:</p>
+              {[
+                "Based on my current stats, what should my protein target be?",
+                "How should I structure my training this week based on my recovery?",
+                "I'm stuck on my bench press — what are some proven plateau-busting techniques?",
+                "What's a good meal I can log for high protein and low calories?",
+                "How do I interpret my HbA1c result and what affects it?",
+              ].map((prompt, i) => (
+                <button key={i} onClick={() => { setInput(prompt) }}
+                  className="w-full text-left text-xs bg-surfaceAlt hover:bg-accent/10 border border-border/30 hover:border-accent/30 rounded-xl px-3 py-2.5 text-muted hover:text-text transition-colors">
+                  {prompt}
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {messages.map((m, i) => (
@@ -201,7 +237,16 @@ export default function Coach() {
           <Send size={16}/>
         </button>
       </div>
-      <p className="text-xs text-muted mt-1">Chat history is not saved. Refresh to start a new session.</p>
+      <div className="flex items-center justify-between mt-1">
+        <p className="text-xs text-muted">History auto-saved. Last 20 messages persisted.</p>
+        {messages.length > 0 && (
+          <button onClick={async () => {
+            const existing = await getAll(uid, 'coachHistory', { orderByField: 'createdAt' })
+            for (const d of existing) await deleteEntry(uid, 'coachHistory', d.id)
+            setMessages([])
+          }} className="text-xs text-muted hover:text-danger transition-colors">Clear history</button>
+        )}
+      </div>
     </div>
   )
 }

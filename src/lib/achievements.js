@@ -81,6 +81,13 @@ function gymWeekStreak(liftDates, gymGoal = 3) {
 // ── Badge definitions ──────────────────────────────────────────────────────────
 
 export const BADGE_DEFS = [
+  // ── Beginner tier ──
+  { id: 'first-meal',        name: 'First Bite',         icon: 'Apple',     desc: 'Log your first meal', tier: 'beginner' },
+  { id: '3-day-weigh',       name: 'Scale Habit',        icon: 'Scale',     desc: '3-day weigh-in streak', tier: 'beginner' },
+  { id: '3-gym-sessions',    name: 'Getting Started',    icon: 'Dumbbell',  desc: 'Log 3 gym sessions', tier: 'beginner' },
+  { id: '3-cardio',          name: 'Cardio Starter',     icon: 'HeartPulse',desc: 'Log 3 cardio sessions', tier: 'beginner' },
+  { id: 'first-mood',        name: 'Self-Aware',         icon: 'Smile',     desc: 'Log your first mood entry', tier: 'beginner' },
+  // ── Standard tier ──
   { id: 'first-weigh',       name: 'First Step',         icon: 'Scale',     desc: 'Log your first weight entry' },
   { id: 'week-warrior',      name: 'Week Warrior',        icon: 'Calendar',  desc: '7-day weigh-in streak' },
   { id: 'month-mornings',    name: 'Month of Mornings',   icon: 'Sun',       desc: '30-day weigh-in streak' },
@@ -216,6 +223,26 @@ export function computeAchievements({ weights = [], lifts = [], cardio = [], nut
     let progress = 0
 
     switch (def.id) {
+      case 'first-meal':
+        earned = nutritionLog.length >= 1
+        progress = earned ? 1 : 0
+        break
+      case '3-day-weigh':
+        earned = streaks.weighIn.longest >= 3
+        progress = Math.min(1, streaks.weighIn.current / 3)
+        break
+      case '3-gym-sessions':
+        earned = lifts.length >= 3
+        progress = Math.min(1, lifts.length / 3)
+        break
+      case '3-cardio':
+        earned = cardio.length >= 3
+        progress = Math.min(1, cardio.length / 3)
+        break
+      case 'first-mood':
+        earned = wellbeing.length >= 1
+        progress = earned ? 1 : 0
+        break
       case 'first-weigh':
         earned = weights.length > 0
         if (earned) date = weights[weights.length - 1]?.date

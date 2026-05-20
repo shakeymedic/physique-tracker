@@ -51,12 +51,20 @@ function getBestE1RM(lifts, exerciseName) {
 }
 
 // Compute milestone progress for a single milestone
-function computeMilestoneProgress(milestone, lifts, weights) {
+function computeMilestoneProgress(milestone, lifts, weights, cardioLogs = [], mobilityLogs = []) {
   if (!milestone) return { hit: false, progress: 0, currentKg: null, targetKg: null }
 
-  // Non-lift milestones
-  if (milestone.type === 'cardio-count') return { hit: false, progress: 0, currentKg: null, targetKg: null }
-  if (milestone.type === 'mobility-streak') return { hit: false, progress: 0, currentKg: null, targetKg: null }
+  // Non-lift milestones: compute actual progress
+  if (milestone.type === 'cardio-count') {
+    const count = (cardioLogs || []).length
+    const target = milestone.target || 10
+    return { hit: count >= target, progress: Math.min(1, count / target), currentKg: count, targetKg: target }
+  }
+  if (milestone.type === 'mobility-streak') {
+    const count = (mobilityLogs || []).length
+    const target = milestone.target || 21
+    return { hit: count >= target, progress: Math.min(1, count / target), currentKg: count, targetKg: target }
+  }
 
   if (!milestone.exercise) return { hit: false, progress: 0, currentKg: null, targetKg: null }
 
@@ -84,15 +92,26 @@ function normaliseLift(lift) {
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 function Tabs({ active, set }) {
+  const primary = ['Workout', 'Cardio', 'Mobility', 'Programs']
+  const secondary = ['Templates', 'History', 'Recovery', 'Timer']
   return (
-    <div className="flex gap-2 mb-4 flex-wrap">
-      {['Workout', 'Cardio', 'Mobility', 'Programs', 'Templates', 'History', 'Recovery', 'Timer'].map(t => (
-        <button
-          key={t}
-          onClick={() => set(t)}
-          className={active === t ? 'btn-primary text-xs px-3 py-1.5' : 'btn-secondary text-xs px-3 py-1.5'}
-        >{t}</button>
-      ))}
+    <div className="mb-4 space-y-1.5">
+      <div className="flex gap-1.5 flex-wrap">
+        {primary.map(t => (
+          <button key={t} onClick={() => set(t)}
+            className={active === t ? 'btn-primary text-xs px-3 py-1.5' : 'btn-secondary text-xs px-3 py-1.5'}>
+            {t}
+          </button>
+        ))}
+      </div>
+      <div className="flex gap-1.5 flex-wrap">
+        {secondary.map(t => (
+          <button key={t} onClick={() => set(t)}
+            className={active === t ? 'btn-primary text-xs px-3 py-1.5' : 'btn-ghost text-xs px-3 py-1.5 text-muted'}>
+            {t}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
@@ -650,7 +669,7 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                       <div>
                         <label className="label text-xs">Distance (km)</label>
                         <input type="number" step="0.01" className="input" placeholder="optional"
-                          value={cb.distanceKm || ''} onChange={e => updateCardioBlock(exIdx, 'distanceKm', e.target.value)}/>
+                          value={cb.distanceKm || ''} onChange={e = inputMode="decimal"> updateCardioBlock(exIdx, 'distanceKm', e.target.value)}/>
                       </div>
                       <div>
                         <label className="label text-xs">Kcal burned</label>
@@ -665,7 +684,7 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                       <div>
                         <label className="label text-xs">RPE</label>
                         <input type="number" min="1" max="10" step="0.5" className="input" placeholder="optional"
-                          value={cb.rpe || ''} onChange={e => updateCardioBlock(exIdx, 'rpe', e.target.value)}/>
+                          value={cb.rpe || ''} onChange={e = inputMode="decimal"> updateCardioBlock(exIdx, 'rpe', e.target.value)}/>
                       </div>
                     </div>
                   </div>
@@ -753,7 +772,7 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                           className="input text-center font-medium"
                           placeholder="0"
                           value={sf.weight}
-                          onChange={e => updateSetForm(exIdx, 'weight', e.target.value)}
+                          onChange={e = inputMode="decimal"> updateSetForm(exIdx, 'weight', e.target.value)}
                           onKeyDown={e => { if (e.key === 'Enter') { document.getElementById(`reps-${exIdx}`)?.focus() } }}
                         />
                       </div>
@@ -1016,7 +1035,7 @@ function CardioTab({ uid }) {
           <div>
             <label className="label">Distance (km)</label>
             <input type="number" step="0.01" min="0" className="input" placeholder="optional"
-              value={form.distanceKm} onChange={e => setForm(p => ({ ...p, distanceKm: e.target.value }))}/>
+              value={form.distanceKm} onChange={e = inputMode="decimal"> setForm(p => ({ ...p, distanceKm: e.target.value }))}/>
           </div>
           <div>
             <label className="label">Avg HR (bpm)</label>
@@ -1036,7 +1055,7 @@ function CardioTab({ uid }) {
           <div>
             <label className="label">RPE (1–10)</label>
             <input type="number" min="1" max="10" step="0.5" className="input" placeholder="optional"
-              value={form.rpe} onChange={e => setForm(p => ({ ...p, rpe: e.target.value }))}/>
+              value={form.rpe} onChange={e = inputMode="decimal"> setForm(p => ({ ...p, rpe: e.target.value }))}/>
           </div>
           <div className="col-span-2 md:col-span-3">
             <label className="label">Notes</label>
@@ -1051,6 +1070,58 @@ function CardioTab({ uid }) {
           </div>
         </form>
       </div>
+
+      {/* Cardio stats summary */}
+      {(() => {
+        const last30 = entries.filter(e => e.date >= format(new Date(Date.now() - 30 * 86400000), 'yyyy-MM-dd'))
+        const totalKm = last30.reduce((a, e) => a + (parseFloat(e.distanceKm) || 0), 0)
+        const totalMin = last30.reduce((a, e) => a + (parseFloat(e.durationMin) || 0), 0)
+        const totalKcal = last30.reduce((a, e) => a + (parseFloat(e.kcal) || 0), 0)
+        const longest = last30.reduce((best, e) => (parseFloat(e.durationMin) || 0) > (best?.durationMin || 0) ? e : best, null)
+        const withPace = last30.filter(e => e.distanceKm && e.durationMin && e.type === 'Running')
+        const avgPaceSec = withPace.length ? withPace.reduce((a, e) => a + (e.durationMin * 60 / e.distanceKm), 0) / withPace.length : null
+        const avgPaceStr = avgPaceSec ? `${Math.floor(avgPaceSec / 60)}:${String(Math.round(avgPaceSec % 60)).padStart(2, '0')}/km` : null
+        if (!last30.length) return null
+        return (
+          <div className="card">
+            <div className="card-title flex items-center gap-2"><HeartPulse size={16} className="text-success"/>Last 30 Days</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="bg-bg rounded-xl p-3 text-center">
+                <div className="text-xs text-muted mb-1">Sessions</div>
+                <div className="text-accent font-bold text-lg">{last30.length}</div>
+              </div>
+              {totalKm > 0 && (
+                <div className="bg-bg rounded-xl p-3 text-center">
+                  <div className="text-xs text-muted mb-1">Distance</div>
+                  <div className="text-accent font-bold text-lg">{totalKm.toFixed(1)} km</div>
+                </div>
+              )}
+              <div className="bg-bg rounded-xl p-3 text-center">
+                <div className="text-xs text-muted mb-1">Total time</div>
+                <div className="text-accent font-bold text-lg">{Math.round(totalMin)} min</div>
+              </div>
+              {totalKcal > 0 && (
+                <div className="bg-bg rounded-xl p-3 text-center">
+                  <div className="text-xs text-muted mb-1">Calories burned</div>
+                  <div className="text-accent font-bold text-lg">{Math.round(totalKcal)}</div>
+                </div>
+              )}
+              {avgPaceStr && (
+                <div className="bg-bg rounded-xl p-3 text-center">
+                  <div className="text-xs text-muted mb-1">Avg running pace</div>
+                  <div className="text-accent font-bold text-lg">{avgPaceStr}</div>
+                </div>
+              )}
+              {longest && (
+                <div className="bg-bg rounded-xl p-3 text-center col-span-2">
+                  <div className="text-xs text-muted mb-1">Longest session</div>
+                  <div className="text-text font-semibold text-sm">{longest.type} · {longest.durationMin} min{longest.distanceKm ? ` · ${longest.distanceKm} km` : ''}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })()}
 
       <div className="card">
         <div className="card-title">Recent Cardio (last 30)</div>
@@ -1911,13 +1982,102 @@ function ProgramsTab({ uid }) {
               <Trophy size={16} className="text-warn"/> Milestones
             </div>
             {activeProgramDef.milestones.map(m => {
-              const { hit, progress, currentKg, targetKg } = computeMilestoneProgress(m, lifts, weights)
+              const { hit, progress, currentKg, targetKg } = computeMilestoneProgress(m, lifts, weights, cardioLogs, mobilityLogs)
               return (
                 <MilestoneRow key={m.id} milestone={m} progress={progress} hit={hit} currentKg={currentKg} targetKg={targetKg}/>
               )
             })}
           </div>
         )}
+
+        {/* Working weights tracker */}
+        {(() => {
+          const workoutKeys = Object.keys(activeProgramDef.workouts || {})
+          const allProgramExes = workoutKeys.flatMap(k =>
+            (activeProgramDef.workouts[k].exercises || []).map(ex => ex.name)
+          ).filter((v, i, a) => a.indexOf(v) === i)
+          if (!allProgramExes.length) return null
+
+          // Compute last-used weight per exercise from recent lifts
+          const lastUsed = {}
+          lifts.slice(0, 50).forEach(l => {
+            (l.exercises || []).forEach(ex => {
+              if (allProgramExes.includes(ex.name) && !lastUsed[ex.name]) {
+                const sets = (ex.sets || []).filter(s => !s.warmup)
+                if (sets.length) {
+                  const maxWeight = Math.max(...sets.map(s => parseFloat(s.weight) || 0))
+                  lastUsed[ex.name] = { weight: maxWeight, date: l.date }
+                }
+              }
+            })
+          })
+
+          // Working weights from settings or computed from lifts
+          const workingWeights = activeProgram.workingWeights || {}
+
+          return (
+            <div className="card">
+              <div className="card-title flex items-center gap-2">
+                <Dumbbell size={15} className="text-accent"/> Working Weights
+              </div>
+              <p className="text-xs text-muted mb-3">Your current working weight per exercise. Updates automatically from your sessions, or edit manually.</p>
+              <div className="space-y-2">
+                {allProgramExes.map(exName => {
+                  const manual = workingWeights[exName]
+                  const auto = lastUsed[exName]
+                  const displayWeight = manual?.weight || auto?.weight || null
+                  const displayDate = manual?.date || auto?.date || null
+                  const [editing, setEditing] = useState(false)
+                  const [editVal, setEditVal] = useState(String(displayWeight || ''))
+
+                  const saveWeight = async () => {
+                    const kg = parseFloat(editVal)
+                    if (isNaN(kg) || kg <= 0) return
+                    const updated = {
+                      ...activeProgram,
+                      workingWeights: {
+                        ...(activeProgram.workingWeights || {}),
+                        [exName]: { weight: kg, date: format(new Date(), 'yyyy-MM-dd') }
+                      }
+                    }
+                    await saveSettings(uid, { activeProgram: updated })
+                    setSettings(prev => ({ ...prev, activeProgram: updated }))
+                    setEditing(false)
+                  }
+
+                  return (
+                    <div key={exName} className="flex items-center justify-between bg-surfaceAlt rounded-xl px-3 py-2">
+                      <div className="min-w-0">
+                        <div className="text-sm text-text font-medium truncate">{exName}</div>
+                        {displayDate && <div className="text-xs text-muted">Last: {displayDate}</div>}
+                      </div>
+                      {editing ? (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <input type="number" step="0.5" inputMode="decimal"
+                            className="input w-20 text-sm text-center"
+                            value={editVal} onChange={e => setEditVal(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && saveWeight()}
+                          />
+                          <span className="text-xs text-muted">kg</span>
+                          <button onClick={saveWeight} className="btn-primary text-xs px-2">✓</button>
+                          <button onClick={() => setEditing(false)} className="btn-ghost text-xs">✕</button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-accent font-semibold">
+                            {displayWeight ? `${displayWeight} kg` : '—'}
+                          </span>
+                          <button onClick={() => { setEditVal(String(displayWeight || '')); setEditing(true) }}
+                            className="btn-ghost p-1"><Pencil size={12}/></button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })()}
 
         <div className="flex gap-2 flex-wrap">
           {activeProgramDef.custom && (
@@ -2077,6 +2237,27 @@ function HistoryTab({ uid, onEditLift }) {
     return () => { u1(); u2() }
   }, [uid])
 
+  // Weekly tonnage (last 12 weeks)
+  const tonnageByWeek = (() => {
+    const result = []
+    for (let i = 11; i >= 0; i--) {
+      const wkStart = new Date()
+      wkStart.setDate(wkStart.getDate() - wkStart.getDay() + 1 - i * 7)
+      const wkEnd = new Date(wkStart)
+      wkEnd.setDate(wkStart.getDate() + 6)
+      const s = format(wkStart, 'yyyy-MM-dd')
+      const e = format(wkEnd, 'yyyy-MM-dd')
+      const weekLifts = lifts.filter(l => l.date >= s && l.date <= e)
+      const tonnes = weekLifts.reduce((acc, l) => {
+        const ws = (l.exercises || []).filter(ex => !(ex.warmup)).reduce((a, ex) =>
+          a + (ex.sets || []).filter(s => !s.warmup).reduce((b, st) => b + (parseFloat(st.weight) || 0) * (parseInt(st.reps) || 0), 0), 0)
+        return acc + ws
+      }, 0)
+      result.push({ week: format(wkStart, 'dd/MM'), tonnage: Math.round(tonnes / 1000 * 10) / 10 })
+    }
+    return result
+  })()
+
   const liftItems = lifts.map(l => ({ ...l, _type: 'lift' }))
   const cardioItems = cardio.map(c => ({ ...c, _type: 'cardio' }))
   const allItems = [...liftItems, ...cardioItems].sort((a, b) => b.date.localeCompare(a.date))
@@ -2095,6 +2276,25 @@ function HistoryTab({ uid, onEditLift }) {
 
   return (
     <div className="space-y-4">
+      {tonnageByWeek.some(w => w.tonnage > 0) && (
+        <div className="card">
+          <div className="card-title flex items-center gap-2">
+            <Zap size={16} className="text-accent"/> Weekly Training Volume (tonnes)
+          </div>
+          <p className="text-xs text-muted mb-2">Total tonnage (kg × reps) per week over last 12 weeks. Trend shows progressive overload.</p>
+          <ResponsiveContainer width="100%" height={140}>
+            <BarChart data={tonnageByWeek}>
+              <CartesianGrid stroke="#334155" strokeDasharray="3 3"/>
+              <XAxis dataKey="week" tick={{ fill: '#94a3b8', fontSize: 9 }} interval={1}/>
+              <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} width={32}/>
+              <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', color: '#f1f5f9' }}
+                formatter={v => [`${v}t`, 'Tonnage']}/>
+              <Bar dataKey="tonnage" fill="#22d3ee" radius={[3, 3, 0, 0]}/>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
       <div className="card">
         <div className="card-title">e1RM Trend</div>
         <select className="input mb-3" value={chartExercise} onChange={e => setChartExercise(e.target.value)}>

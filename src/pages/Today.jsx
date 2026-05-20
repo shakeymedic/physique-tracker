@@ -299,9 +299,31 @@ export default function Today() {
           />
           {moodSaving && <p className="text-xs text-muted mt-2">Saving…</p>}
           {moodSaved && <p className="text-xs text-success mt-2">✓ Mood saved</p>}
+          {/* Weekly wellbeing summary */}
+          {(() => {
+            const weekWb = wellbeing.filter(w => w.date >= weekStart)
+            if (!weekWb.length) return null
+            const avgMood = weekWb.filter(w => w.mood).length
+              ? (weekWb.filter(w => w.mood).reduce((a, w) => a + w.mood, 0) / weekWb.filter(w => w.mood).length).toFixed(1)
+              : null
+            const avgSleep = weekWb.filter(w => w.sleepHours).length
+              ? (weekWb.filter(w => w.sleepHours).reduce((a, w) => a + (parseFloat(w.sleepHours) || 0), 0) / weekWb.filter(w => w.sleepHours).length).toFixed(1)
+              : null
+            const symptomDays = weekWb.filter(w => w.symptoms?.length > 0).length
+            return (
+              <div className="mt-3 pt-2 border-t border-border/20">
+                <p className="text-xs text-muted">
+                  This week:
+                  {avgMood && <> avg mood <span className="text-text font-medium">{avgMood}/5</span></>}
+                  {avgSleep && <> · avg sleep <span className="text-text font-medium">{avgSleep}h</span></>}
+                  {symptomDays > 0 && <> · <span className="text-warn">{symptomDays} symptom day{symptomDays !== 1 ? 's' : ''}</span></>}
+                </p>
+              </div>
+            )
+          })()}
           <button
             onClick={() => navigate('/wellbeing')}
-            className="btn-ghost text-xs mt-3"
+            className="btn-ghost text-xs mt-2"
           >
             Full wellbeing log →
           </button>
@@ -348,15 +370,19 @@ export default function Today() {
             <Cloud size={16} className="text-accent" /> Quick Weight Log
           </div>
           {todayWeight ? (
-            <div className="mb-3 text-sm">
-              <span className="text-accent font-semibold text-lg">{todayWeight.weight} kg</span>
-              {todayWeight.bodyfat && <span className="text-muted ml-2">· {todayWeight.bodyfat}% BF</span>}
-              <span className="text-muted ml-2">logged today</span>
-              {streaks.weighIn.current > 1 && (
-                <span className="text-xs text-accent ml-2">🔥 {streaks.weighIn.current}-day weigh-in streak</span>
+            <div className="mb-3">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-accent font-bold text-2xl">{todayWeight.weight} kg</span>
+                {todayWeight.bodyfat && <span className="text-muted text-sm">· {todayWeight.bodyfat}% BF</span>}
+                <span className="chip-ok text-xs ml-auto">Logged ✓</span>
+              </div>
+              {streaks?.weighIn?.current > 1 && (
+                <p className="text-xs text-accent">🔥 {streaks.weighIn.current}-day streak</p>
               )}
             </div>
-          ) : null}
+          ) : (
+            <p className="text-xs text-muted mb-2">Not logged yet today — weigh in now.</p>
+          )}
           <form onSubmit={saveWeight} className="flex flex-wrap gap-2 items-end">
             <div>
               <label className="label">Date</label>
@@ -366,12 +392,12 @@ export default function Today() {
             <div>
               <label className="label">Weight (kg)</label>
               <input type="number" step="0.1" min="30" max="300" className="input w-24" placeholder="kg"
-                value={wForm.weight} onChange={e => setWForm(p => ({ ...p, weight: e.target.value }))} />
+                value={wForm.weight} onChange={e = inputMode="decimal"> setWForm(p => ({ ...p, weight: e.target.value }))} />
             </div>
             <div>
               <label className="label">BF% (opt)</label>
               <input type="number" step="0.1" min="3" max="60" className="input w-20" placeholder="%"
-                value={wForm.bodyfat} onChange={e => setWForm(p => ({ ...p, bodyfat: e.target.value }))} />
+                value={wForm.bodyfat} onChange={e = inputMode="decimal"> setWForm(p => ({ ...p, bodyfat: e.target.value }))} />
             </div>
             <button type="submit" className="btn-primary" disabled={wSaving || !wForm.weight}>
               {wSaving ? 'Saving…' : 'Save'}

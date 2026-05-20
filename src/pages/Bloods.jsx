@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../auth.jsx'
-import { subscribe, addEntry, deleteEntry, setEntry, getSettings } from '../data.js'
+import { subscribe, addEntry, deleteEntry, setEntry, getSettings, saveSettings } from '../data.js'
 import { format } from 'date-fns'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine,
@@ -116,7 +116,7 @@ function LogTab({ uid, sex }) {
                   <div key={f.key}>
                     <label className="label">{f.label} <span className="text-muted normal-case font-normal">({f.unit})</span></label>
                     <input type="number" step="any" min="0" className="input"
-                      value={form[f.key]} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}/>
+                      value={form[f.key]} onChange={e = inputMode="decimal"> setForm(p => ({ ...p, [f.key]: e.target.value }))}/>
                   </div>
                 ))}
               </div>
@@ -173,6 +173,22 @@ function LogTab({ uid, sex }) {
 function TrendsTab({ uid, sex }) {
   const [entries, setEntries] = useState([])
   const [param, setParam] = useState('systolic')
+  const [settings, setSettings] = useState({})
+  const [targetInput, setTargetInput] = useState('')
+
+  useEffect(() => { getSettings(uid).then(s => {
+    setSettings(s)
+    const t = s.bloodTargets?.[param]
+    setTargetInput(t != null ? String(t) : '')
+  }) }, [uid, param])
+
+  const saveTarget = async () => {
+    const val = parseFloat(targetInput)
+    if (isNaN(val)) return
+    const targets = { ...(settings.bloodTargets || {}), [param]: val }
+    await saveSettings(uid, { bloodTargets: targets })
+    setSettings(prev => ({ ...prev, bloodTargets: targets }))
+  }
 
   useEffect(() => subscribe(uid, 'bloods', setEntries, { limit: 200 }), [uid])
 
@@ -217,10 +233,22 @@ function TrendsTab({ uid, sex }) {
               {refLines.map((rl, i) => (
                 <ReferenceLine key={i} y={rl.v} stroke={rl.c} strokeDasharray="4 2" strokeWidth={1}/>
               ))}
+              {settings.bloodTargets?.[param] && (
+                <ReferenceLine y={settings.bloodTargets[param]} stroke="#a78bfa" strokeDasharray="6 3" strokeWidth={2} label={{ value: 'Target', fill: '#a78bfa', fontSize: 10 }}/>
+              )}
               <Line type="monotone" dataKey="value" stroke="#22d3ee" dot={{ r: 3, fill: '#22d3ee' }} strokeWidth={2}/>
             </LineChart>
           </ResponsiveContainer>
         )}
+        <div className="flex gap-2 items-end mt-3 pt-3 border-t border-border/20">
+          <div className="flex-1">
+            <label className="label text-xs">Personal target for {fieldInfo?.label} ({fieldInfo?.unit})</label>
+            <input type="number" step="any" className="input" placeholder="e.g. 130" value={targetInput}
+              inputMode="decimal"
+              onChange={e => setTargetInput(e.target.value)}/>
+          </div>
+          <button onClick={saveTarget} className="btn-secondary text-sm">Set target</button>
+        </div>
       </div>
     </div>
   )

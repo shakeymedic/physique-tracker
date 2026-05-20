@@ -179,18 +179,22 @@ export default function Insights() {
     else rateStatus = 'ahead'
   }
 
-  // All-time PR per exercise
+  // All-time PR per exercise — handles both old single-exercise and new multi-exercise shape
   const allPRs = {}
   const epleyCalc = (w, r) => parseFloat(w) * (1 + parseFloat(r) / 30)
-  ;['Bench Press', 'Squat', 'Deadlift', 'Overhead Press', 'Barbell Row', 'Pull-Up'].forEach(ex => {
-    let best = 0
-    lifts.filter(l => l.exercise === ex).forEach(s => {
-      ;(s.sets || []).forEach(set => {
-        const e = epleyCalc(set.weight, set.reps)
-        if (e > best) best = e
+  lifts.forEach(l => {
+    const exercises = l.exercises
+      ? l.exercises
+      : l.exercise ? [{ name: l.exercise, sets: l.sets || [] }] : []
+    exercises.forEach(ex => {
+      if (!ex.name) return
+      ;(ex.sets || []).forEach(s => {
+        const e = epleyCalc(s.weight, s.reps)
+        if (!allPRs[ex.name] || e > parseFloat(allPRs[ex.name])) {
+          allPRs[ex.name] = e.toFixed(1)
+        }
       })
     })
-    if (best > 0) allPRs[ex] = best.toFixed(1)
   })
 
   // ── Weekly goals (last 4 weeks) ──

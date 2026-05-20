@@ -6,6 +6,7 @@ import { Download, LogOut, Save, CloudUpload, Bell, BellOff, Database, Award, X,
 import { requestNotificationPermission } from '../lib/messaging.js'
 import { backupToDrive } from '../lib/drive.js'
 import { resolveProgram, computeWeekNumber } from '../training/programs.js'
+import { generateGpExport } from '../lib/gpExport.js'
 
 const SEED_MEALS = [
   { name: 'Porridge with banana', kcal: 380, protein: 14, carbs: 60, fat: 8 },
@@ -27,11 +28,22 @@ const DEFAULT_SELF_CARE_CATEGORIES = [
   'reading', 'early bed', 'no alcohol', 'social time',
 ]
 
-function Section({ title, children }) {
+function Section({ title, children, defaultOpen = true }) {
+  const [open, setOpen] = useState(defaultOpen)
   return (
     <div className="card">
-      <div className="card-title">{title}</div>
-      {children}
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center justify-between w-full group"
+      >
+        <div className="card-title">{title}</div>
+        <span className={`text-muted transition-transform duration-200 ${open ? '' : '-rotate-90'}`}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </span>
+      </button>
+      {open && <div className="mt-3">{children}</div>}
     </div>
   )
 }
@@ -223,7 +235,7 @@ export default function Settings() {
             <div>
               <label className="label">Height (cm)</label>
               <input type="number" min="100" max="250" step="0.1" className="input"
-                value={form.height} onChange={e => setForm(p => ({ ...p, height: e.target.value }))} />
+                value={form.height} onChange={e = inputMode="decimal"> setForm(p => ({ ...p, height: e.target.value }))} />
             </div>
           </div>
         </Section>
@@ -370,6 +382,10 @@ export default function Settings() {
         </button>
       </Section>
 
+      <Section title="Health Summary PDF">
+        <GpExportSection uid={uid}/>
+      </Section>
+
       <Section title="Data Export">
         <p className="text-sm text-muted mb-3">Download all your data as CSV files (one per collection).</p>
         <button onClick={exportAll} className="btn-secondary" disabled={exporting}>
@@ -410,6 +426,12 @@ export default function Settings() {
           </>
         )}
       </Section>
+
+      {/* CSV Import */}
+      <CsvImportSection uid={uid}/>
+
+      {/* Local reminders */}
+      <LocalRemindersSection uid={uid}/>
 
       {/* Nav customisation */}
       <NavCustomSection uid={uid}/>
@@ -797,5 +819,237 @@ Settings → Google Drive Backup: backs up all data as a JSON file to your Drive
         </div>
       )}
     </Section>
+  )
+}
+
+// ── CSV Import Section ───────────────────────────────────────────────────────────
+function CsvImportSection({ uid }) {
+  const [importing, setImporting] = useState(false)
+  const [result, setResult] = useState(null)
+
+  const parseCSV = (text) => {
+    const lines = text.trim().split('\n').filter(Boolean)
+    if (lines.length < 2) return []
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/[^a-z0-9]/g, ''))
+    return lines.slice(1).map(line => {
+      const vals = line.split(',')
+      const obj = {}
+      headers.forEach((h, i) => { obj[h] = vals[i]?.trim() || '' })
+      return obj
+    })
+  }
+
+  const handleFile = async (e, type) => {
+    const file = e.target.files[0]
+    if (!file) return
+    setImporting(true)
+    setResult(null)
+    try {
+      const text = await file.text()
+      const rows = parseCSV(text)
+      let count = 0
+      if (type === 'weights') {
+        for (const row of rows) {
+          const date = row.date || row.date_logged
+          const weight = parseFloat(row.weight || row.weightkg || row.kg)
+          if (!date || isNaN(weight)) continue
+          await addEntry(uid, 'weights', {
+            date,
+            weight,
+            bodyFat: row.bodyfat || row.bf ? parseFloat(row.bodyfat || row.bf) || null : null,
+            notes: row.notes || '',
+          })
+          count++
+        }
+        setResult(`Imported ${count} weight entries`)
+      } else if (type === 'nutrition') {
+        for (const row of rows) {
+          const date = row.date
+          const name = row.name || row.meal || row.food
+          const kcal = parseFloat(row.kcal || row.calories)
+          if (!date || !name) continue
+          await addEntry(uid, 'nutritionLog', {
+            date,
+            name,
+            kcal: isNaN(kcal) ? 0 : kcal,
+            protein: parseFloat(row.protein) || 0,
+            carbs: parseFloat(row.carbs || row.carbohydrates) || 0,
+            fat: parseFloat(row.fat) || 0,
+            fibre: parseFloat(row.fibre || row.fiber) || 0,
+            timeOfDay: row.timeofday || null,
+          })
+          count++
+        }
+        setResult(`Imported ${count} meal entries`)
+      }
+    } catch (err) {
+      setResult(`Error: ${err.message}`)
+    } finally {
+      setImporting(false)
+      e.target.value = ''
+    }
+  }
+
+  return (
+    <Section title="Import Data">
+      <p className="text-sm text-muted mb-3">Import historical data from CSV files. Headers must include <code>date</code> and the relevant fields.</p>
+      <div className="space-y-3">
+        <div className="bg-surfaceAlt rounded-xl p-3">
+          <div className="text-sm font-medium text-text mb-1">Weight log</div>
+          <p className="text-xs text-muted mb-2">Required: <code>date</code>, <code>weight</code>. Optional: <code>bodyFat</code>, <code>notes</code></p>
+          <label className="btn-secondary text-xs cursor-pointer flex items-center gap-2 w-fit">
+            <Download size={13}/> Choose CSV
+            <input type="file" accept=".csv" className="hidden" disabled={importing}
+              onChange={e => handleFile(e, 'weights')}/>
+          </label>
+        </div>
+        <div className="bg-surfaceAlt rounded-xl p-3">
+          <div className="text-sm font-medium text-text mb-1">Nutrition log</div>
+          <p className="text-xs text-muted mb-2">Required: <code>date</code>, <code>name</code>. Optional: <code>kcal</code>, <code>protein</code>, <code>carbs</code>, <code>fat</code>, <code>fibre</code></p>
+          <label className="btn-secondary text-xs cursor-pointer flex items-center gap-2 w-fit">
+            <Download size={13}/> Choose CSV
+            <input type="file" accept=".csv" className="hidden" disabled={importing}
+              onChange={e => handleFile(e, 'nutrition')}/>
+          </label>
+        </div>
+      </div>
+      {importing && <p className="text-xs text-accent mt-2">Importing...</p>}
+      {result && <p className={`text-xs mt-2 ${result.startsWith('Error') ? 'text-danger' : 'text-success'}`}>{result}</p>}
+    </Section>
+  )
+}
+
+// ── Local Reminders Section ──────────────────────────────────────────────────────
+function LocalRemindersSection({ uid }) {
+  const [settings, setSettings] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({ weighIn: '07:30', logMeal: '', training: '', meds: '' })
+
+  useEffect(() => {
+    getSettings(uid).then(s => {
+      setSettings(s)
+      if (s.localReminders) setForm(s.localReminders)
+    })
+  }, [uid])
+
+  const scheduleReminders = async () => {
+    if (!('Notification' in window)) return alert('Notifications not supported in this browser.')
+    const perm = await Notification.requestPermission()
+    if (perm !== 'granted') return alert('Notification permission denied. Enable in browser settings.')
+    setSaving(true)
+    try {
+      await saveSettings(uid, { localReminders: form })
+      setSettings(prev => ({ ...prev, localReminders: form }))
+      // Schedule via daily check using service worker message or simple timeout
+      // Store in localStorage for the SW to pick up on next load
+      localStorage.setItem('pt-reminders', JSON.stringify(form))
+      alert('Reminders saved. They will fire each day when the app is open.')
+    } finally { setSaving(false) }
+  }
+
+  const fields = [
+    { key: 'weighIn', label: 'Daily weigh-in reminder' },
+    { key: 'logMeal', label: 'Meal logging reminder' },
+    { key: 'training', label: 'Training reminder' },
+    { key: 'meds', label: 'Medication reminder' },
+  ]
+
+  return (
+    <Section title="Daily Reminders">
+      <p className="text-sm text-muted mb-3">Set times for in-app reminders. These fire when the app is open in your browser. Leave blank to disable.</p>
+      <div className="space-y-3 mb-3">
+        {fields.map(f => (
+          <div key={f.key} className="flex items-center gap-3">
+            <label className="text-sm text-text w-44 shrink-0">{f.label}</label>
+            <input type="time" className="input w-32"
+              value={form[f.key] || ''}
+              onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}/>
+          </div>
+        ))}
+      </div>
+      <button onClick={scheduleReminders} className="btn-primary flex items-center gap-2" disabled={saving}>
+        <Bell size={14}/> {saving ? 'Saving...' : 'Save reminders'}
+      </button>
+    </Section>
+  )
+}
+
+// ── Nutrition Preferences ────────────────────────────────────────────────────────
+function NutritionPrefsSection({ uid }) {
+  const [settings, setSettings] = useState(null)
+  const [dayEnd, setDayEnd] = useState(0)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    getSettings(uid).then(s => {
+      setSettings(s)
+      setDayEnd(s.nutritionDayEndHour ?? 0)
+    })
+  }, [uid])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await saveSettings(uid, { nutritionDayEndHour: parseInt(dayEnd) || 0 })
+      setSaved(true); setTimeout(() => setSaved(false), 2000)
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="label">Day ends at</label>
+        <p className="text-xs text-muted mb-2">If you eat past midnight, set this so logs before this hour count as the previous day. Set to 0 for standard midnight cutoff.</p>
+        <div className="flex items-center gap-3">
+          <select className="input w-32" value={dayEnd} onChange={e => setDayEnd(e.target.value)}>
+            {[0,1,2,3,4,5].map(h => (
+              <option key={h} value={h}>{h === 0 ? 'Midnight (default)' : `${h}:00 AM`}</option>
+            ))}
+          </select>
+          <button onClick={save} className="btn-primary text-sm" disabled={saving}>
+            {saved ? 'Saved!' : saving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── GP Export Section ────────────────────────────────────────────────────────────
+function GpExportSection({ uid }) {
+  const [exporting, setExporting] = useState(false)
+
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      const [weights, bloods, medications, medicationLog, lifts, cardio, s] = await Promise.all([
+        getAll(uid, 'weights'),
+        getAll(uid, 'bloods'),
+        getAll(uid, 'medications'),
+        getAll(uid, 'medicationLog'),
+        getAll(uid, 'lifts'),
+        getAll(uid, 'cardio'),
+        getSettings(uid),
+      ])
+      await generateGpExport({
+        weights, bloods, medications, medicationLog, lifts, cardio,
+        settings: s,
+        name: s?.profile?.name,
+      })
+    } catch (e) {
+      alert(`Export failed: ${e.message}`)
+    } finally { setExporting(false) }
+  }
+
+  return (
+    <div>
+      <p className="text-sm text-muted mb-3">
+        Generate a 3-month health summary PDF covering weight trend, blood results, medications, and training. Useful for GP appointments or ARCP reviews.
+      </p>
+      <button onClick={handleExport} disabled={exporting} className="btn-primary flex items-center gap-2">
+        <Download size={14}/> {exporting ? 'Generating PDF...' : 'Export Health Summary PDF'}
+      </button>
+    </div>
   )
 }

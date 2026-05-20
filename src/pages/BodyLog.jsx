@@ -27,6 +27,7 @@ function SubTabs({ active, set }) {
 function WeightSection({ uid }) {
   const [entries, setEntries] = useState([])
   const [form, setForm] = useState({ date: today(), weight: '', bodyFat: '', notes: '' })
+  const [chartRange, setChartRange] = useState(90)
   const [saving, setSaving] = useState(false)
   const [editId, setEditId] = useState(null)
 
@@ -60,7 +61,7 @@ function WeightSection({ uid }) {
   const cancelEdit = () => { setEditId(null); setForm({ date: today(), weight: '', bodyFat: '', notes: '' }) }
 
   const sorted = entries.slice().sort((a, b) => a.date.localeCompare(b.date))
-  const chartData = sorted.slice(-90).map(w => ({
+  const chartData = sorted.slice(chartRange === 999 ? 0 : -chartRange).map(w => ({
     date: w.date.slice(5),
     weight: parseFloat(w.weight),
     bf: w.bodyFat ? parseFloat(w.bodyFat) : undefined,
@@ -80,12 +81,12 @@ function WeightSection({ uid }) {
           <div>
             <label className="label">Weight (kg) *</label>
             <input type="number" step="0.1" min="0" className="input" placeholder="e.g. 82.5"
-              value={form.weight} onChange={e => setForm(p => ({ ...p, weight: e.target.value }))}/>
+              value={form.weight} onChange={e = inputMode="decimal"> setForm(p => ({ ...p, weight: e.target.value }))}/>
           </div>
           <div>
             <label className="label">Body Fat % (optional)</label>
             <input type="number" step="0.1" min="0" max="60" className="input" placeholder="e.g. 18"
-              value={form.bodyFat} onChange={e => setForm(p => ({ ...p, bodyFat: e.target.value }))}/>
+              value={form.bodyFat} onChange={e = inputMode="decimal"> setForm(p => ({ ...p, bodyFat: e.target.value }))}/>
           </div>
           <div>
             <label className="label">Notes</label>
@@ -99,9 +100,66 @@ function WeightSection({ uid }) {
         </form>
       </div>
 
+      {/* Body composition change summary */}
+      {entries.length >= 2 && (() => {
+        const sorted90 = entries.slice().sort((a, b) => a.date.localeCompare(b.date))
+        const earliest = sorted90[0]
+        const latest = sorted90[sorted90.length - 1]
+        const weightChange = (parseFloat(latest.weight) - parseFloat(earliest.weight)).toFixed(1)
+        const bfChange = (earliest.bodyFat && latest.bodyFat)
+          ? (parseFloat(latest.bodyFat) - parseFloat(earliest.bodyFat)).toFixed(1)
+          : null
+        const lbmEarly = (earliest.weight && earliest.bodyFat) ? parseFloat(earliest.weight) * (1 - parseFloat(earliest.bodyFat) / 100) : null
+        const lbmLatest = (latest.weight && latest.bodyFat) ? parseFloat(latest.weight) * (1 - parseFloat(latest.bodyFat) / 100) : null
+        const lbmChange = lbmEarly && lbmLatest ? (lbmLatest - lbmEarly).toFixed(1) : null
+        const sign = v => parseFloat(v) >= 0 ? `+${v}` : String(v)
+        const color = (v, positive) => {
+          const n = parseFloat(v)
+          if (n === 0) return 'text-text'
+          return (n > 0) === positive ? 'text-success' : 'text-danger'
+        }
+        return (
+          <div className="card">
+            <div className="card-title">Change Since First Entry</div>
+            <p className="text-xs text-muted mb-3">Comparing {earliest.date} → {latest.date}</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <div className="bg-bg rounded-xl p-3">
+                <div className="text-xs text-muted mb-1">Weight</div>
+                <div className={`font-bold text-lg ${color(weightChange, false)}`}>{sign(weightChange)} kg</div>
+                <div className="text-xs text-muted">{earliest.weight} → {latest.weight} kg</div>
+              </div>
+              {bfChange !== null && (
+                <div className="bg-bg rounded-xl p-3">
+                  <div className="text-xs text-muted mb-1">Body Fat</div>
+                  <div className={`font-bold text-lg ${color(bfChange, false)}`}>{sign(bfChange)}%</div>
+                  <div className="text-xs text-muted">{earliest.bodyFat} → {latest.bodyFat}%</div>
+                </div>
+              )}
+              {lbmChange !== null && (
+                <div className="bg-bg rounded-xl p-3">
+                  <div className="text-xs text-muted mb-1">Lean Body Mass</div>
+                  <div className={`font-bold text-lg ${color(lbmChange, true)}`}>{sign(lbmChange)} kg</div>
+                  <div className="text-xs text-muted">{lbmEarly?.toFixed(1)} → {lbmLatest?.toFixed(1)} kg</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })()}
+
       {chartData.length > 1 && (
         <div className="card">
-          <div className="card-title">90-Day Trend</div>
+          <div className="flex items-center justify-between mb-2">
+            <div className="card-title">Weight Trend</div>
+            <div className="flex gap-1">
+              {[['90d', 90], ['6m', 180], ['1y', 365], ['All', 999]].map(([label, days]) => (
+                <button key={label} onClick={() => setChartRange(days)}
+                  className={chartRange === days ? 'btn-primary text-xs px-2 py-0.5' : 'btn-ghost text-xs px-2 py-0.5'}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           <ResponsiveContainer width="100%" height={180}>
             <LineChart data={chartData}>
               <CartesianGrid stroke="#334155" strokeDasharray="3 3"/>
@@ -201,7 +259,7 @@ function MeasurementsSection({ uid }) {
             <div key={f}>
               <label className="label">{MEAS_LABELS[f]}</label>
               <input type="number" step="0.1" min="0" className="input" placeholder="cm"
-                value={form[f]} onChange={e => setForm(p => ({ ...p, [f]: e.target.value }))}/>
+                value={form[f]} onChange={e = inputMode="decimal"> setForm(p => ({ ...p, [f]: e.target.value }))}/>
             </div>
           ))}
           <div className="col-span-2 md:col-span-4 flex gap-2">

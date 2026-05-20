@@ -7,6 +7,7 @@ import {
 } from 'recharts'
 import { Trash2, Plus, Scan, Coffee, Pencil, ChevronDown, ChevronRight, Copy } from 'lucide-react'
 import BarcodeScanner from '../components/BarcodeScanner.jsx'
+import { searchFoodByName, scaleMacros } from '../lib/openfoodfacts.js'
 import MicButton from '../components/MicButton.jsx'
 import EditableRow from '../components/EditableRow.jsx'
 import { TodChip, TodSelect, detectTimeOfDay } from '../lib/timeOfDay.jsx'
@@ -44,6 +45,9 @@ function TodayTab({ uid }) {
   const [saving, setSaving] = useState(false)
   const [scanOpen, setScanOpen] = useState(false)
   const [saveScannedAsTemplate, setSaveScannedAsTemplate] = useState(false)
+  const [foodSearch, setFoodSearch] = useState('')
+  const [foodResults, setFoodResults] = useState([])
+  const [foodSearching, setFoodSearching] = useState(false)
   const [dietBreaks, setDietBreaks] = useState({})
   const [dbSaving, setDbSaving] = useState(false)
   const [editId, setEditId] = useState(null)
@@ -73,7 +77,17 @@ function TodayTab({ uid }) {
     }, 500)
   }, [form])
 
-  const todayStr = today()
+  // Configurable day-end time: if hour < dayEndHour, 'today' is still yesterday
+  const dayEndHour = settings.nutritionDayEndHour ?? 0
+  const todayStr = (() => {
+    const now = new Date()
+    if (dayEndHour > 0 && now.getHours() < dayEndHour) {
+      const yest = new Date(now)
+      yest.setDate(yest.getDate() - 1)
+      return format(yest, 'yyyy-MM-dd')
+    }
+    return today()
+  })()
   const todayLog = log.filter(l => l.date === todayStr)
   const totals = todayLog.reduce((acc, n) => ({
     kcal: acc.kcal + (parseFloat(n.kcal) || 0),
@@ -198,6 +212,31 @@ function TodayTab({ uid }) {
       const { id, createdAt, updatedAt, ...rest } = meal
       await addEntry(uid, 'nutritionLog', { ...rest, date: todayStr, timeOfDay: meal.timeOfDay || null })
     }
+  }
+
+  const handleFoodSearch = async (q) => {
+    setFoodSearch(q)
+    if (q.trim().length < 3) { setFoodResults([]); return }
+    setFoodSearching(true)
+    try {
+      const results = await searchFoodByName(q, 8)
+      setFoodResults(results)
+    } catch (e) { setFoodResults([]) }
+    finally { setFoodSearching(false) }
+  }
+
+  const applyFoodResult = (product, portionG = 100) => {
+    const scaled = scaleMacros(product, portionG)
+    setForm(p => ({
+      ...p,
+      name: product.name,
+      kcal: String(Math.round(scaled.kcal)),
+      protein: String(Math.round(scaled.protein * 10) / 10),
+      carbs: String(Math.round(scaled.carbs * 10) / 10),
+      fat: String(Math.round(scaled.fat * 10) / 10),
+    }))
+    setFoodResults([])
+    setFoodSearch('')
   }
 
   const handleScanResult = ({ name, kcal, protein, carbs, fat }) => {
@@ -409,6 +448,35 @@ function TodayTab({ uid }) {
       )}
 
       {/* Log meal form */}
+      {/* Food name search */}
+      <div className="card">
+        <div className="card-title flex items-center gap-2">
+          <span className="text-accent">&#x1F50D;</span> Search Food Database
+        </div>
+        <p className="text-xs text-muted mb-2">Search Open Food Facts by name — fills the log form automatically.</p>
+        <div className="flex gap-2 mb-2">
+          <input
+            type="text"
+            className="input flex-1"
+            placeholder="e.g. chicken breast, protein bar..."
+            value={foodSearch}
+            onChange={e => handleFoodSearch(e.target.value)}
+          />
+          {foodSearching && <span className="text-xs text-muted self-center">Searching...</span>}
+        </div>
+        {foodResults.length > 0 && (
+          <div className="space-y-1 max-h-48 overflow-y-auto">
+            {foodResults.map((r, i) => (
+              <button key={i} onClick={() => applyFoodResult(r, 100)}
+                className="w-full text-left bg-surfaceAlt hover:bg-accent/10 rounded-xl px-3 py-2 transition-colors">
+                <div className="text-sm text-text font-medium truncate">{r.name}</div>
+                <div className="text-xs text-muted">per 100g: {Math.round(r.kcalPer100g)} kcal · {r.proteinPer100g?.toFixed(1)}P · {r.carbsPer100g?.toFixed(1)}C · {r.fatPer100g?.toFixed(1)}F</div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="card">
         <div className="card-title">{editId ? 'Edit Meal' : 'Log Meal'}</div>
         <form onSubmit={save} className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -659,12 +727,12 @@ function MacrosTab({ uid }) {
           <div>
             <label className="label">Weight (kg)</label>
             <input type="number" step="0.1" className="input" value={form.weight}
-              onChange={e => setForm(p => ({ ...p, weight: e.target.value }))}/>
+              onChange={e = inputMode="decimal"> setForm(p => ({ ...p, weight: e.target.value }))}/>
           </div>
           <div>
             <label className="label">Body Fat %</label>
             <input type="number" step="0.1" className="input" value={form.bodyfat}
-              onChange={e => setForm(p => ({ ...p, bodyfat: e.target.value }))}/>
+              onChange={e = inputMode="decimal"> setForm(p => ({ ...p, bodyfat: e.target.value }))}/>
           </div>
           <div>
             <label className="label">Activity</label>
@@ -687,12 +755,12 @@ function MacrosTab({ uid }) {
               <div>
                 <label className="label">Rate (kg/week)</label>
                 <input type="number" step="0.1" min="0" className="input" value={form.rateKgPerWeek}
-                  onChange={e => setForm(p => ({ ...p, rateKgPerWeek: e.target.value }))}/>
+                  onChange={e = inputMode="decimal"> setForm(p => ({ ...p, rateKgPerWeek: e.target.value }))}/>
               </div>
               <div>
                 <label className="label">Target weight (kg, optional)</label>
                 <input type="number" step="0.1" className="input" placeholder="e.g. 90" value={form.targetWeight}
-                  onChange={e => setForm(p => ({ ...p, targetWeight: e.target.value }))}/>
+                  onChange={e = inputMode="decimal"> setForm(p => ({ ...p, targetWeight: e.target.value }))}/>
               </div>
             </>
           )}
@@ -716,7 +784,7 @@ function MacrosTab({ uid }) {
             <div>
               <label className="label">Protein (g/kg)</label>
               <input type="number" step="0.1" min="0.5" max="4" className="input" value={form.proteinPerKg}
-                onChange={e => setForm(p => ({ ...p, proteinPerKg: e.target.value }))}/>
+                onChange={e = inputMode="decimal"> setForm(p => ({ ...p, proteinPerKg: e.target.value }))}/>
             </div>
             <div>
               <label className="label">Fat (% of kcal)</label>

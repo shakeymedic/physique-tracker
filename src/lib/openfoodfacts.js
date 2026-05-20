@@ -41,3 +41,26 @@ export function scaleMacros(per100g, portionG) {
     fat: Math.round(per100g.fatPer100g * factor * 10) / 10,
   }
 }
+
+/**
+ * Search Open Food Facts by product name.
+ * Returns array of { name, kcalPer100g, proteinPer100g, carbsPer100g, fatPer100g, barcode }
+ */
+export async function searchFoodByName(query, pageSize = 10) {
+  if (!query || query.trim().length < 2) return []
+  const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=${pageSize}&fields=code,product_name,nutriments`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Open Food Facts search returned ${res.status}`)
+  const data = await res.json()
+  return (data.products || [])
+    .filter(p => p.product_name && p.nutriments)
+    .map(p => ({
+      name: p.product_name,
+      barcode: p.code,
+      kcalPer100g: parseFloat(p.nutriments['energy-kcal_100g'] ?? p.nutriments['energy-kcal'] ?? 0),
+      proteinPer100g: parseFloat(p.nutriments['proteins_100g'] ?? p.nutriments['proteins'] ?? 0),
+      carbsPer100g: parseFloat(p.nutriments['carbohydrates_100g'] ?? p.nutriments['carbohydrates'] ?? 0),
+      fatPer100g: parseFloat(p.nutriments['fat_100g'] ?? p.nutriments['fat'] ?? 0),
+    }))
+    .filter(p => p.kcalPer100g > 0 || p.proteinPer100g > 0)
+}
