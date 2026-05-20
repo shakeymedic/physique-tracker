@@ -81,12 +81,12 @@ function WeightSection({ uid }) {
           <div>
             <label className="label">Weight (kg) *</label>
             <input type="number" step="0.1" min="0" className="input" placeholder="e.g. 82.5"
-              value={form.weight} onChange={e = inputMode="decimal"> setForm(p => ({ ...p, weight: e.target.value }))}/>
+              value={form.weight} inputMode="decimal" onChange={e => setForm(p => ({ ...p, weight: e.target.value }))}/>
           </div>
           <div>
             <label className="label">Body Fat % (optional)</label>
             <input type="number" step="0.1" min="0" max="60" className="input" placeholder="e.g. 18"
-              value={form.bodyFat} onChange={e = inputMode="decimal"> setForm(p => ({ ...p, bodyFat: e.target.value }))}/>
+              value={form.bodyFat} inputMode="decimal" onChange={e => setForm(p => ({ ...p, bodyFat: e.target.value }))}/>
           </div>
           <div>
             <label className="label">Notes</label>
@@ -259,7 +259,7 @@ function MeasurementsSection({ uid }) {
             <div key={f}>
               <label className="label">{MEAS_LABELS[f]}</label>
               <input type="number" step="0.1" min="0" className="input" placeholder="cm"
-                value={form[f]} onChange={e = inputMode="decimal"> setForm(p => ({ ...p, [f]: e.target.value }))}/>
+                value={form[f]} inputMode="decimal" onChange={e => setForm(p => ({ ...p, [f]: e.target.value }))}/>
             </div>
           ))}
           <div className="col-span-2 md:col-span-4 flex gap-2">

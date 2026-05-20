@@ -191,7 +191,7 @@ function LogTab({ uid }) {
         <div className="mb-4">
           <label className="label">Sleep hours</label>
           <input type="number" step="0.5" min="0" max="24" className="input" placeholder="e.g. 7.5"
-            value={form.sleepHours || ''} onChange={e = inputMode="decimal"> setForm(p => ({ ...p, sleepHours: e.target.value }))}/>
+            value={form.sleepHours || ''} inputMode="decimal" onChange={e => setForm(p => ({ ...p, sleepHours: e.target.value }))}/>
         </div>
 
         <div className="mb-4">

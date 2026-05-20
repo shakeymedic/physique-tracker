@@ -669,7 +669,7 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                       <div>
                         <label className="label text-xs">Distance (km)</label>
                         <input type="number" step="0.01" className="input" placeholder="optional"
-                          value={cb.distanceKm || ''} onChange={e = inputMode="decimal"> updateCardioBlock(exIdx, 'distanceKm', e.target.value)}/>
+                          value={cb.distanceKm || ''} inputMode="decimal" onChange={e => updateCardioBlock(exIdx, 'distanceKm', e.target.value)}/>
                       </div>
                       <div>
                         <label className="label text-xs">Kcal burned</label>
@@ -684,7 +684,7 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                       <div>
                         <label className="label text-xs">RPE</label>
                         <input type="number" min="1" max="10" step="0.5" className="input" placeholder="optional"
-                          value={cb.rpe || ''} onChange={e = inputMode="decimal"> updateCardioBlock(exIdx, 'rpe', e.target.value)}/>
+                          value={cb.rpe || ''} inputMode="decimal" onChange={e => updateCardioBlock(exIdx, 'rpe', e.target.value)}/>
                       </div>
                     </div>
                   </div>
@@ -772,7 +772,7 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                           className="input text-center font-medium"
                           placeholder="0"
                           value={sf.weight}
-                          onChange={e = inputMode="decimal"> updateSetForm(exIdx, 'weight', e.target.value)}
+                          inputMode="decimal" onChange={e => updateSetForm(exIdx, 'weight', e.target.value)}
                           onKeyDown={e => { if (e.key === 'Enter') { document.getElementById(`reps-${exIdx}`)?.focus() } }}
                         />
                       </div>
@@ -1035,7 +1035,7 @@ function CardioTab({ uid }) {
           <div>
             <label className="label">Distance (km)</label>
             <input type="number" step="0.01" min="0" className="input" placeholder="optional"
-              value={form.distanceKm} onChange={e = inputMode="decimal"> setForm(p => ({ ...p, distanceKm: e.target.value }))}/>
+              value={form.distanceKm} inputMode="decimal" onChange={e => setForm(p => ({ ...p, distanceKm: e.target.value }))}/>
           </div>
           <div>
             <label className="label">Avg HR (bpm)</label>
@@ -1055,7 +1055,7 @@ function CardioTab({ uid }) {
           <div>
             <label className="label">RPE (1–10)</label>
             <input type="number" min="1" max="10" step="0.5" className="input" placeholder="optional"
-              value={form.rpe} onChange={e = inputMode="decimal"> setForm(p => ({ ...p, rpe: e.target.value }))}/>
+              value={form.rpe} inputMode="decimal" onChange={e => setForm(p => ({ ...p, rpe: e.target.value }))}/>
           </div>
           <div className="col-span-2 md:col-span-3">
             <label className="label">Notes</label>

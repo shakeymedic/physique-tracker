@@ -727,12 +727,12 @@ function MacrosTab({ uid }) {
           <div>
             <label className="label">Weight (kg)</label>
             <input type="number" step="0.1" className="input" value={form.weight}
-              onChange={e = inputMode="decimal"> setForm(p => ({ ...p, weight: e.target.value }))}/>
+              inputMode="decimal" onChange={e => setForm(p => ({ ...p, weight: e.target.value }))}/>
           </div>
           <div>
             <label className="label">Body Fat %</label>
             <input type="number" step="0.1" className="input" value={form.bodyfat}
-              onChange={e = inputMode="decimal"> setForm(p => ({ ...p, bodyfat: e.target.value }))}/>
+              inputMode="decimal" onChange={e => setForm(p => ({ ...p, bodyfat: e.target.value }))}/>
           </div>
           <div>
             <label className="label">Activity</label>
@@ -755,12 +755,12 @@ function MacrosTab({ uid }) {
               <div>
                 <label className="label">Rate (kg/week)</label>
                 <input type="number" step="0.1" min="0" className="input" value={form.rateKgPerWeek}
-                  onChange={e = inputMode="decimal"> setForm(p => ({ ...p, rateKgPerWeek: e.target.value }))}/>
+                  inputMode="decimal" onChange={e => setForm(p => ({ ...p, rateKgPerWeek: e.target.value }))}/>
               </div>
               <div>
                 <label className="label">Target weight (kg, optional)</label>
                 <input type="number" step="0.1" className="input" placeholder="e.g. 90" value={form.targetWeight}
-                  onChange={e = inputMode="decimal"> setForm(p => ({ ...p, targetWeight: e.target.value }))}/>
+                  inputMode="decimal" onChange={e => setForm(p => ({ ...p, targetWeight: e.target.value }))}/>
               </div>
             </>
           )}
@@ -784,7 +784,7 @@ function MacrosTab({ uid }) {
             <div>
               <label className="label">Protein (g/kg)</label>
               <input type="number" step="0.1" min="0.5" max="4" className="input" value={form.proteinPerKg}
-                onChange={e = inputMode="decimal"> setForm(p => ({ ...p, proteinPerKg: e.target.value }))}/>
+                inputMode="decimal" onChange={e => setForm(p => ({ ...p, proteinPerKg: e.target.value }))}/>
             </div>
             <div>
               <label className="label">Fat (% of kcal)</label>

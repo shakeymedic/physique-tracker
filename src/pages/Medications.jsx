@@ -245,7 +245,7 @@ export default function Medications() {
                 <div>
                   <label className="label">Half-life (hours, optional)</label>
                   <input type="number" step="0.1" min="0" className="input" placeholder="e.g. 120 (Mounjaro ≈ 120h / 5d)"
-                    value={form.halfLifeHours} onChange={e = inputMode="decimal"> setForm(p => ({ ...p, halfLifeHours: e.target.value }))}/>
+                    value={form.halfLifeHours} inputMode="decimal" onChange={e => setForm(p => ({ ...p, halfLifeHours: e.target.value }))}/>
                 </div>
                 <div>
                   <label className="label">Start date</label>
@@ -436,7 +436,7 @@ function StatDoseForm({ form, setForm, onSave }) {
         <div>
           <label className="label">Half-life (h, optional)</label>
           <input type="number" step="0.1" min="0" className="input"
-            value={form.halfLifeHours} onChange={e = inputMode="decimal"> setForm(p => ({ ...p, halfLifeHours: e.target.value }))}/>
+            value={form.halfLifeHours} inputMode="decimal" onChange={e => setForm(p => ({ ...p, halfLifeHours: e.target.value }))}/>
         </div>
         <div className="md:col-span-2">
           <label className="label">Notes</label>

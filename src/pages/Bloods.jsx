@@ -116,7 +116,7 @@ function LogTab({ uid, sex }) {
                   <div key={f.key}>
                     <label className="label">{f.label} <span className="text-muted normal-case font-normal">({f.unit})</span></label>
                     <input type="number" step="any" min="0" className="input"
-                      value={form[f.key]} onChange={e = inputMode="decimal"> setForm(p => ({ ...p, [f.key]: e.target.value }))}/>
+                      value={form[f.key]} inputMode="decimal" onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}/>
                   </div>
                 ))}
               </div>

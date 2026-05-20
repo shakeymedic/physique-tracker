@@ -392,12 +392,12 @@ export default function Today() {
             <div>
               <label className="label">Weight (kg)</label>
               <input type="number" step="0.1" min="30" max="300" className="input w-24" placeholder="kg"
-                value={wForm.weight} onChange={e = inputMode="decimal"> setWForm(p => ({ ...p, weight: e.target.value }))} />
+                value={wForm.weight} inputMode="decimal" onChange={e => setWForm(p => ({ ...p, weight: e.target.value }))} />
             </div>
             <div>
               <label className="label">BF% (opt)</label>
               <input type="number" step="0.1" min="3" max="60" className="input w-20" placeholder="%"
-                value={wForm.bodyfat} onChange={e = inputMode="decimal"> setWForm(p => ({ ...p, bodyfat: e.target.value }))} />
+                value={wForm.bodyfat} inputMode="decimal" onChange={e => setWForm(p => ({ ...p, bodyfat: e.target.value }))} />
             </div>
             <button type="submit" className="btn-primary" disabled={wSaving || !wForm.weight}>
               {wSaving ? 'Saving…' : 'Save'}

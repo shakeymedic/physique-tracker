@@ -235,7 +235,7 @@ export default function Settings() {
             <div>
               <label className="label">Height (cm)</label>
               <input type="number" min="100" max="250" step="0.1" className="input"
-                value={form.height} onChange={e = inputMode="decimal"> setForm(p => ({ ...p, height: e.target.value }))} />
+                value={form.height} inputMode="decimal" onChange={e => setForm(p => ({ ...p, height: e.target.value }))} />
             </div>
           </div>
         </Section>
