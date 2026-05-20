@@ -72,7 +72,7 @@ function DynamicNav({ settings }) {
     }
   })
   return (
-    <nav className="max-w-6xl mx-auto px-2 flex gap-1 overflow-x-auto no-scrollbar">
+    <nav className="max-w-screen-2xl mx-auto px-2 flex gap-1 overflow-x-auto no-scrollbar">
       {orderedTabs.map(t => (
         <NavLink key={t.to} to={t.to} end={t.end} className={({isActive}) =>
           `shrink-0 flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg mb-2 transition-colors ${isActive ? 'bg-accent/15 text-accent' : 'text-muted hover:text-text'}`}>
@@ -116,7 +116,7 @@ export default function App() {
         </div>
       )}
       <header className="sticky top-0 z-20 bg-bg/90 backdrop-blur border-b border-border/30">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div className="max-w-screen-2xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-accent/15 flex items-center justify-center text-accent font-bold">PT</div>
             <div>
@@ -136,7 +136,7 @@ export default function App() {
         <DynamicNav settings={navSettings}/>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-4">
+      <main className="max-w-screen-2xl mx-auto px-4 py-4">
         <Routes>
           <Route path="/" element={<Today />} />
           <Route path="/insights" element={<Insights />} />
