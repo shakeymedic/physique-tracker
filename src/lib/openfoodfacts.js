@@ -44,11 +44,19 @@ export function scaleMacros(per100g, portionG) {
 
 /**
  * Search Open Food Facts by product name.
+ * Uses the v2 API which has proper CORS headers (unlike the CGI endpoint).
  * Returns array of { name, kcalPer100g, proteinPer100g, carbsPer100g, fatPer100g, barcode }
  */
 export async function searchFoodByName(query, pageSize = 10) {
-  if (!query || query.trim().length < 2) return []
-  const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=${pageSize}&fields=code,product_name,nutriments`
+  if (!query || query.trim().length < 3) return []
+  const params = new URLSearchParams({
+    search_terms: query.trim(),
+    fields: 'code,product_name,nutriments',
+    page_size: String(pageSize),
+    page: '1',
+    sort_by: 'unique_scans_n', // most-scanned first = most relevant
+  })
+  const url = `https://world.openfoodfacts.org/api/v2/search?${params}`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`Open Food Facts search returned ${res.status}`)
   const data = await res.json()

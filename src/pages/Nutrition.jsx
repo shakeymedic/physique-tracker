@@ -216,15 +216,20 @@ function TodayTab({ uid }) {
     }
   }
 
-  const handleFoodSearch = async (q) => {
+  const foodSearchTimer = useRef(null)
+  const handleFoodSearch = (q) => {
     setFoodSearch(q)
-    if (q.trim().length < 3) { setFoodResults([]); return }
+    setFoodResults([])
+    clearTimeout(foodSearchTimer.current)
+    if (q.trim().length < 3) { setFoodSearching(false); return }
     setFoodSearching(true)
-    try {
-      const results = await searchFoodByName(q, 8)
-      setFoodResults(results)
-    } catch (e) { setFoodResults([]) }
-    finally { setFoodSearching(false) }
+    foodSearchTimer.current = setTimeout(async () => {
+      try {
+        const results = await searchFoodByName(q, 8)
+        setFoodResults(results)
+      } catch (e) { setFoodResults([]) }
+      finally { setFoodSearching(false) }
+    }, 500)
   }
 
   const selectFood = (product) => {
