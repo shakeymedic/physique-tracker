@@ -11,6 +11,7 @@ import { flag } from '../clinical/ranges.js'
 import WeightChart, { computeWeeklyRate } from '../components/WeightChart.jsx'
 import ConsistencyHeatmap from '../components/ConsistencyHeatmap.jsx'
 import { getProgramById } from '../training/programs.js'
+import { computeAchievements, BADGE_DEFS } from '../lib/achievements.js'
 import MilestoneRow from '../components/MilestoneRow.jsx'
 
 const epleyDash = (w, r) => parseFloat(w) * (1 + parseFloat(r) / 30)
@@ -232,6 +233,13 @@ export default function Insights() {
     ...selfCareLog.map(s => ({ date: s.date, type: 'selfcare' })),
   ]
 
+  // ── Achievements ──
+  const { badges } = computeAchievements({
+    weights, lifts, cardio, nutritionLog: nutrition, wellbeing, selfCareLog, settings
+  })
+  const earnedBadges = BADGE_DEFS.filter(b => badges[b.id]?.earned)
+  const recentEarned = earnedBadges.slice(-3).reverse() // last 3 earned
+
   // ── Card manager state ──
   const ALL_CARDS = [
     { id: 'goal',        label: 'Goal Tracker' },
@@ -404,6 +412,73 @@ export default function Insights() {
                   {l.label}
                 </span>
               ))}
+            </div>
+
+            {/* Achievement badges summary */}
+            <div className="mt-4 pt-4 border-t border-border/20">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Trophy size={14} className="text-warn"/>
+                  <span className="text-sm font-semibold text-text">Achievements</span>
+                </div>
+                <span className="text-xs text-muted">{earnedBadges.length} / {BADGE_DEFS.length} earned</span>
+              </div>
+
+              {/* Progress bar */}
+              <div className="w-full bg-surfaceAlt rounded-full h-1.5 mb-3">
+                <div
+                  className="bg-warn h-1.5 rounded-full transition-all"
+                  style={{ width: `${Math.round((earnedBadges.length / BADGE_DEFS.length) * 100)}%` }}
+                />
+              </div>
+
+              {/* Tier breakdown */}
+              {(() => {
+                const beginner = BADGE_DEFS.filter(b => b.tier === 'beginner')
+                const standard = BADGE_DEFS.filter(b => !b.tier)
+                const earnedBeg = beginner.filter(b => badges[b.id]?.earned).length
+                const earnedStd = standard.filter(b => badges[b.id]?.earned).length
+                return (
+                  <div className="flex gap-4 text-xs text-muted mb-3">
+                    <span>Beginner: <span className="text-text font-medium">{earnedBeg}/{beginner.length}</span></span>
+                    <span>Standard: <span className="text-text font-medium">{earnedStd}/{standard.length}</span></span>
+                  </div>
+                )
+              })()}
+
+              {/* Last 3 earned */}
+              {recentEarned.length > 0 ? (
+                <div>
+                  <p className="text-xs text-muted mb-2">Recently earned</p>
+                  <div className="space-y-1.5">
+                    {recentEarned.map(b => (
+                      <div key={b.id} className="flex items-center gap-3 bg-warn/10 border border-warn/20 rounded-xl px-3 py-2">
+                        <Trophy size={14} className="text-warn shrink-0"/>
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-warn truncate">{b.name}</div>
+                          <div className="text-xs text-muted">{b.desc}</div>
+                        </div>
+                        {b.tier === 'beginner' && (
+                          <span className="text-xs bg-accent/20 text-accent rounded-full px-2 py-0.5 shrink-0">Beginner</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-3">
+                  <p className="text-xs text-muted">No badges earned yet — start logging to unlock your first.</p>
+                </div>
+              )}
+
+              {earnedBadges.length > 0 && (
+                <button
+                  onClick={() => window.location.hash = '#/achievements'}
+                  className="btn-ghost text-xs mt-2 w-full text-center"
+                >
+                  View all badges →
+                </button>
+              )}
             </div>
           </div>
         )
