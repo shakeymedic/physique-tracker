@@ -48,6 +48,8 @@ function TodayTab({ uid }) {
   const [foodSearch, setFoodSearch] = useState('')
   const [foodResults, setFoodResults] = useState([])
   const [foodSearching, setFoodSearching] = useState(false)
+  const [selectedFood, setSelectedFood] = useState(null)   // { product, portionG }
+  const [portionInput, setPortionInput] = useState('100')
   const [dietBreaks, setDietBreaks] = useState({})
   const [dbSaving, setDbSaving] = useState(false)
   const [editId, setEditId] = useState(null)
@@ -225,18 +227,26 @@ function TodayTab({ uid }) {
     finally { setFoodSearching(false) }
   }
 
-  const applyFoodResult = (product, portionG = 100) => {
-    const scaled = scaleMacros(product, portionG)
+  const selectFood = (product) => {
+    setSelectedFood(product)
+    setPortionInput('100')
+  }
+
+  const applyFoodResult = (product, portionG) => {
+    const g = parseFloat(portionG) || 100
+    const scaled = scaleMacros(product, g)
     setForm(p => ({
       ...p,
-      name: product.name,
-      kcal: String(Math.round(scaled.kcal)),
-      protein: String(Math.round(scaled.protein * 10) / 10),
-      carbs: String(Math.round(scaled.carbs * 10) / 10),
-      fat: String(Math.round(scaled.fat * 10) / 10),
+      name: `${product.name}${g !== 100 ? ` (${g}g)` : ''}`,
+      kcal: String(scaled.kcal),
+      protein: String(scaled.protein),
+      carbs: String(scaled.carbs),
+      fat: String(scaled.fat),
     }))
     setFoodResults([])
     setFoodSearch('')
+    setSelectedFood(null)
+    setPortionInput('100')
   }
 
   const handleScanResult = ({ name, kcal, protein, carbs, fat }) => {
@@ -464,15 +474,100 @@ function TodayTab({ uid }) {
           />
           {foodSearching && <span className="text-xs text-muted self-center">Searching...</span>}
         </div>
+        {/* Search results with inline portion picker */}
         {foodResults.length > 0 && (
-          <div className="space-y-1 max-h-48 overflow-y-auto">
-            {foodResults.map((r, i) => (
-              <button key={i} onClick={() => applyFoodResult(r, 100)}
-                className="w-full text-left bg-surfaceAlt hover:bg-accent/10 rounded-xl px-3 py-2 transition-colors">
-                <div className="text-sm text-text font-medium truncate">{r.name}</div>
-                <div className="text-xs text-muted">per 100g: {Math.round(r.kcalPer100g)} kcal · {r.proteinPer100g?.toFixed(1)}P · {r.carbsPer100g?.toFixed(1)}C · {r.fatPer100g?.toFixed(1)}F</div>
-              </button>
-            ))}
+          <div className="space-y-1 max-h-96 overflow-y-auto">
+            {foodResults.map((r, i) => {
+              const isSelected = selectedFood?.name === r.name && selectedFood?.barcode === r.barcode
+              const portion = isSelected ? (parseFloat(portionInput) || 100) : 100
+              const preview = isSelected ? scaleMacros(r, portion) : null
+              return (
+                <div key={i}
+                  className={`rounded-xl border transition-colors ${
+                    isSelected
+                      ? 'border-accent/40 bg-accent/5'
+                      : 'border-border/20 bg-surfaceAlt hover:border-accent/20 hover:bg-accent/5'
+                  }`}
+                >
+                  {/* Tap row to select */}
+                  <button
+                    onClick={() => isSelected ? setSelectedFood(null) : selectFood(r)}
+                    className="w-full text-left px-3 py-2.5"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-sm text-text font-medium truncate">{r.name}</div>
+                        <div className="text-xs text-muted">per 100g &mdash; {Math.round(r.kcalPer100g)} kcal &middot; {r.proteinPer100g?.toFixed(1)}g P &middot; {r.carbsPer100g?.toFixed(1)}g C &middot; {r.fatPer100g?.toFixed(1)}g F</div>
+                      </div>
+                      <span className={`text-xs shrink-0 mt-0.5 ${isSelected ? 'text-accent' : 'text-muted'}`}>
+                        {isSelected ? '▲ close' : '▼ select'}
+                      </span>
+                    </div>
+                  </button>
+
+                  {/* Portion picker — only shown when selected */}
+                  {isSelected && (
+                    <div className="px-3 pb-3 space-y-3">
+                      <div className="flex items-end gap-2">
+                        <div className="flex-1">
+                          <label className="label text-xs">Portion size (g)</label>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            min="1"
+                            step="1"
+                            className="input text-lg font-semibold text-center"
+                            value={portionInput}
+                            onChange={e => setPortionInput(e.target.value)}
+                            autoFocus
+                          />
+                        </div>
+                        {/* Common portion quick-picks */}
+                        <div className="flex flex-col gap-1">
+                          {[15, 20, 25, 30, 50, 100, 150, 200].map(g => (
+                            <button key={g}
+                              onClick={() => setPortionInput(String(g))}
+                              className={`text-xs px-2 py-0.5 rounded-lg ${
+                                portionInput === String(g)
+                                  ? 'bg-accent text-bg font-semibold'
+                                  : 'bg-surfaceAlt text-muted hover:text-text'
+                              }`}
+                            >
+                              {g}g
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Live macro preview */}
+                      {preview && (
+                        <div className="bg-bg rounded-xl px-3 py-2 grid grid-cols-4 gap-2 text-center">
+                          {[
+                            { label: 'Kcal', value: preview.kcal },
+                            { label: 'Protein', value: `${preview.protein}g` },
+                            { label: 'Carbs', value: `${preview.carbs}g` },
+                            { label: 'Fat', value: `${preview.fat}g` },
+                          ].map(m => (
+                            <div key={m.label}>
+                              <div className="text-base font-bold text-accent">{m.value}</div>
+                              <div className="text-xs text-muted">{m.label}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <button
+                        onClick={() => applyFoodResult(r, portionInput)}
+                        className="btn-primary w-full text-sm"
+                        disabled={!portionInput || parseFloat(portionInput) <= 0}
+                      >
+                        Add {portionInput}g of {r.name} to log
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
