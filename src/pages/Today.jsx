@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
 import { subscribe, addEntry, setEntry, getSettings, getAll } from '../data.js'
 import { format, subDays, startOfWeek } from 'date-fns'
-import { CheckSquare, Square, Apple, Trophy, Cloud, Dumbbell, Heart, Activity, Play } from 'lucide-react'
+import { CheckSquare, Square, Apple, Trophy, Cloud, Dumbbell, Heart, Activity, Play, Footprints } from 'lucide-react'
 import { quoteOfTheDay } from '../lib/quotes.js'
 import { computeAchievements } from '../lib/achievements.js'
 import { isMedDueToday, lastTakenDate } from '../clinical/meds.js'
@@ -69,6 +69,9 @@ export default function Today() {
   const [wellbeing, setWellbeing] = useState([])
   const [selfCareLog, setSelfCareLog] = useState([])
   const [latestBloods, setLatestBloods] = useState(null)
+  const [stepsLog, setStepsLog] = useState([])
+  const [stepsInput, setStepsInput] = useState('')
+  const [stepsSaving, setStepsSaving] = useState(false)
 
   // Quick weight log form
   const [wForm, setWForm] = useState({ date: today(), weight: '', bodyfat: '' })
@@ -109,10 +112,34 @@ export default function Today() {
         setLatestBloods(sorted[0])
       }
     })
-    return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9() }
+    const u10 = subscribe(uid, 'steps', setStepsLog, { limit: 90 })
+    return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9(); u10() }
   }, [uid])
 
   const todayStr = today()
+
+  // ── Steps ──
+  const stepGoal = settings.activityGoals?.stepsPerDay || 10000
+  const todaySteps = stepsLog.find(s => s.date === todayStr)
+  const saveSteps = async () => {
+    const count = parseInt(stepsInput)
+    if (!count || count < 0) return
+    setStepsSaving(true)
+    try {
+      if (todaySteps?.id) {
+        await setEntry(uid, 'steps', todaySteps.id, { date: todayStr, count })
+      } else {
+        await addEntry(uid, 'steps', { date: todayStr, count })
+      }
+      setStepsInput('')
+    } finally { setStepsSaving(false) }
+  }
+  // 7-day step totals for mini sparkline
+  const last7Steps = Array.from({ length: 7 }, (_, i) => {
+    const d = format(subDays(new Date(), 6 - i), 'yyyy-MM-dd')
+    return { date: d, count: stepsLog.find(s => s.date === d)?.count || 0 }
+  })
+
   const firstName = (user?.displayName || '').split(' ')[0] || user?.email?.split('@')[0] || 'there'
   const dateLabel = format(new Date(), 'EEEE d MMMM yyyy')
 
@@ -422,6 +449,80 @@ export default function Today() {
               )}
             </div>
           )}
+        </div>
+
+        {/* Steps card */}
+        <div className="card">
+          <div className="card-title flex items-center gap-2">
+            <Footprints size={16} className="text-accent"/> Steps
+            {todaySteps && (
+              <span className={`ml-auto text-xs font-semibold ${
+                todaySteps.count >= stepGoal ? 'text-success' : 'text-muted'
+              }`}>
+                {todaySteps.count >= stepGoal ? '🎯 Goal hit!' : `${Math.round((todaySteps.count / stepGoal) * 100)}% of goal`}
+              </span>
+            )}
+          </div>
+
+          {/* Big count display */}
+          <div className="flex items-end gap-3 mb-3">
+            <div className="text-4xl font-bold text-accent leading-none">
+              {todaySteps ? todaySteps.count.toLocaleString() : '—'}
+            </div>
+            <div className="text-sm text-muted mb-1">/ {stepGoal.toLocaleString()} steps</div>
+          </div>
+
+          {/* Progress bar */}
+          {(() => {
+            const pct = todaySteps ? Math.min(100, (todaySteps.count / stepGoal) * 100) : 0
+            return (
+              <div className="w-full bg-surfaceAlt rounded-full h-2 mb-3">
+                <div
+                  className={`h-2 rounded-full transition-all ${
+                    pct >= 100 ? 'bg-success' : pct >= 50 ? 'bg-accent' : 'bg-accent/50'
+                  }`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            )
+          })()}
+
+          {/* 7-day mini bar chart */}
+          <div className="flex items-end gap-1 mb-3" style={{ height: 32 }}>
+            {last7Steps.map((day, i) => {
+              const isToday = i === 6
+              const pct = stepGoal > 0 ? Math.min(1, day.count / stepGoal) : 0
+              return (
+                <div key={day.date} className="flex-1 flex flex-col items-center gap-0.5">
+                  <div
+                    title={`${day.date}: ${day.count.toLocaleString()} steps`}
+                    className={`w-full rounded-sm transition-all ${
+                      isToday ? 'bg-accent' : day.count >= stepGoal ? 'bg-success' : 'bg-surfaceAlt'
+                    }`}
+                    style={{ height: `${Math.max(2, pct * 28)}px` }}
+                  />
+                  <span className="text-[9px] text-muted">{format(subDays(new Date(), 6 - i), 'EEE').slice(0,1)}</span>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Log input */}
+          <div className="flex gap-2">
+            <input
+              type="number"
+              inputMode="numeric"
+              className="input flex-1"
+              placeholder={todaySteps ? `Update (currently ${todaySteps.count.toLocaleString()})` : 'Enter steps...'}
+              value={stepsInput}
+              onChange={e => setStepsInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') saveSteps() }}
+            />
+            <button onClick={saveSteps} disabled={stepsSaving || !stepsInput} className="btn-primary flex items-center gap-1 disabled:opacity-40">
+              <Footprints size={13}/> {stepsSaving ? '...' : 'Log'}
+            </button>
+          </div>
+          <p className="text-xs text-muted mt-1">Check Samsung Health then enter your step count here. Tip: set your daily step goal in Settings → Activity Goals.</p>
         </div>
 
         {/* Macros today */}
