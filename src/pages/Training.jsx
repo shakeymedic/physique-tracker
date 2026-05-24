@@ -1824,6 +1824,8 @@ function ProgramsTab({ uid }) {
   const [lifts, setLifts] = useState([])
   const [weights, setWeights] = useState([])
   const [customPrograms, setCustomPrograms] = useState([])
+  const [cardioLogs, setCardioLogs] = useState([])
+  const [mobilityLogs, setMobilityLogs] = useState([])
   const [viewProgram, setViewProgram] = useState(null)
   const [building, setBuilding] = useState(false)
   const [editingProgram, setEditingProgram] = useState(null)
@@ -1834,8 +1836,10 @@ function ProgramsTab({ uid }) {
     getSettings(uid).then(setSettings)
     const u1 = subscribe(uid, 'lifts', data => setLifts(data.map(normaliseLift)), { limit: 500 })
     const u2 = subscribe(uid, 'weights', setWeights, { limit: 90 })
+    const u3 = subscribe(uid, 'cardio', setCardioLogs, { limit: 200 })
+    const u4 = subscribe(uid, 'mobilityLog', setMobilityLogs, { limit: 200 })
     getAll(uid, 'customPrograms').then(setCustomPrograms)
-    return () => { u1(); u2() }
+    return () => { u1(); u2(); u3(); u4() }
   }, [uid])
 
   const activeProgram = settings.activeProgram || null
