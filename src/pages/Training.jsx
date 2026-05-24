@@ -291,6 +291,9 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
   const DRAFT_KEY = `pt-draft-training-${uid}`
   const { all: allExercises } = useExerciseList(uid)
   const [showBrowser, setShowBrowser] = useState(false)
+  const [showCustomForm, setShowCustomForm] = useState(false)
+  const [customExForm, setCustomExForm] = useState({ name: '', category: 'strength' })
+  const [customSaving, setCustomSaving] = useState(false)
 
   const emptySession = () => ({
     date: today(),
@@ -613,19 +616,19 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
         </div>
       )}
 
-      {templates.length > 0 && (
-        <div className="card">
-          <div className="card-title text-sm">Load Template</div>
-          <div className="flex flex-wrap gap-2">
-            {templates.map(t => (
-              <button key={t.id} onClick={() => loadTemplate(t)} className="btn-secondary text-xs">{t.name}</button>
-            ))}
-          </div>
+      {/* Exercise browser overlay */}
+      {showBrowser && (
+        <div className="fixed inset-0 z-50 bg-bg overflow-y-auto px-3 py-4">
+          <ExerciseBrowser
+            uid={uid}
+            onAdd={(name) => { addExercise(name); setShowBrowser(false) }}
+            onClose={() => setShowBrowser(false)}
+          />
         </div>
       )}
 
       <div className="card">
-        {/* Date / time */}
+        {/* Date / time row */}
         <div className="grid grid-cols-2 gap-3 mb-4">
           <div>
             <label className="label">Date</label>
@@ -638,7 +641,105 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
           </div>
         </div>
 
-        {/* Exercise blocks — always fully expanded */}
+        {/* ── Add exercise ── always at top, full width */}
+        <div className="mb-4">
+          <label className="label">Add exercise</label>
+          <div className="space-y-2">
+            {/* Dropdown — full width, good tap target */}
+            <select
+              className="input w-full"
+              value=""
+              onChange={e => {
+                if (e.target.value) addExercise(e.target.value)
+              }}
+            >
+              <option value="">Select exercise to add...</option>
+              {(() => {
+                const grouped = {}
+                allExercises.forEach(ex => {
+                  const g = ex.isCustom ? 'Custom' : ex.category || 'strength'
+                  if (!grouped[g]) grouped[g] = []
+                  grouped[g].push(ex)
+                })
+                return Object.entries(grouped).map(([g, exes]) => (
+                  <optgroup key={g} label={g.charAt(0).toUpperCase() + g.slice(1)}>
+                    {exes.map(ex => <option key={ex.name} value={ex.name}>{ex.name}</option>)}
+                  </optgroup>
+                ))
+              })()}
+            </select>
+            {/* Secondary actions row */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowBrowser(true)}
+                className="btn-secondary flex-1 flex items-center justify-center gap-1.5"
+              >
+                <Dumbbell size={14}/> Browse by muscle
+              </button>
+              <button
+                onClick={() => setShowCustomForm(s => !s)}
+                className="btn-secondary shrink-0 flex items-center gap-1"
+              >
+                <Plus size={14}/> New
+              </button>
+            </div>
+            {/* Inline custom exercise form */}
+            {showCustomForm && (
+              <div className="bg-surfaceAlt rounded-xl p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold">New exercise</span>
+                  <button onClick={() => setShowCustomForm(false)} className="btn-ghost p-0.5"><X size={14}/></button>
+                </div>
+                <input className="input" placeholder="Exercise name *" autoFocus
+                  value={customExForm.name}
+                  onChange={e => setCustomExForm(p => ({ ...p, name: e.target.value }))}
+                  onKeyDown={async e => {
+                    if (e.key === 'Enter' && customExForm.name.trim()) {
+                      setCustomSaving(true)
+                      try {
+                        await addEntry(uid, 'customExercises', { name: customExForm.name.trim(), category: customExForm.category, primary: [], secondary: [] })
+                        addExercise(customExForm.name.trim())
+                        setCustomExForm({ name: '', category: 'strength' })
+                        setShowCustomForm(false)
+                      } finally { setCustomSaving(false) }
+                    }
+                  }}
+                />
+                <select className="input" value={customExForm.category} onChange={e => setCustomExForm(p => ({ ...p, category: e.target.value }))}>
+                  <option value="strength">Strength</option>
+                  <option value="cardio">Cardio</option>
+                  <option value="mobility">Mobility</option>
+                </select>
+                <button
+                  className="btn-primary w-full"
+                  disabled={customSaving || !customExForm.name.trim()}
+                  onClick={async () => {
+                    if (!customExForm.name.trim()) return
+                    setCustomSaving(true)
+                    try {
+                      await addEntry(uid, 'customExercises', { name: customExForm.name.trim(), category: customExForm.category, primary: [], secondary: [] })
+                      addExercise(customExForm.name.trim())
+                      setCustomExForm({ name: '', category: 'strength' })
+                      setShowCustomForm(false)
+                    } finally { setCustomSaving(false) }
+                  }}
+                >
+                  {customSaving ? 'Saving...' : 'Save & add to session'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Add cardio block */}
+        <button
+          onClick={addCardioBlock}
+          className="btn-secondary w-full flex items-center justify-center gap-1.5 mb-4 text-success border-success/20"
+        >
+          <HeartPulse size={14}/> Add cardio block
+        </button>
+
+        {/* ── Exercise blocks ── */}
         {session.exercises.length > 0 && (
           <div className="space-y-4 mb-4">
             {session.exercises.map((ex, exIdx) => {
@@ -649,15 +750,15 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                 const cb = ex.cardio || {}
                 return (
                   <div key={exIdx} className="border border-success/30 rounded-xl overflow-hidden">
-                    <div className="flex items-center justify-between px-3 py-2 bg-success/10">
+                    <div className="flex items-center justify-between px-3 py-2.5 bg-success/10">
                       <div className="flex items-center gap-2">
                         <HeartPulse size={14} className="text-success"/>
                         <span className="text-sm font-semibold text-success">Cardio</span>
                       </div>
                       <button onClick={() => removeExercise(exIdx)} className="btn-ghost p-1 text-danger"><X size={14}/></button>
                     </div>
-                    <div className="p-3 grid grid-cols-2 md:grid-cols-3 gap-2">
-                      <div className="col-span-2 md:col-span-3">
+                    <div className="p-3 grid grid-cols-2 gap-2">
+                      <div className="col-span-2">
                         <label className="label text-xs">Activity</label>
                         <select className="input" value={cb.type || 'Running'} onChange={e => updateCardioBlock(exIdx, 'type', e.target.value)}>
                           {CARDIO_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
@@ -669,24 +770,19 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                           value={cb.durationMin || ''} onChange={e => updateCardioBlock(exIdx, 'durationMin', e.target.value)}/>
                       </div>
                       <div>
-                        <label className="label text-xs">Distance (km)</label>
-                        <input type="number" step="0.01" className="input" placeholder="optional"
-                          value={cb.distanceKm || ''} inputMode="decimal" onChange={e => updateCardioBlock(exIdx, 'distanceKm', e.target.value)}/>
-                      </div>
-                      <div>
                         <label className="label text-xs">Kcal burned</label>
                         <input type="number" className="input" placeholder="optional"
                           value={cb.kcal || ''} onChange={e => updateCardioBlock(exIdx, 'kcal', e.target.value)}/>
                       </div>
                       <div>
-                        <label className="label text-xs">Avg HR (bpm)</label>
-                        <input type="number" className="input" placeholder="optional"
-                          value={cb.avgHr || ''} onChange={e => updateCardioBlock(exIdx, 'avgHr', e.target.value)}/>
+                        <label className="label text-xs">Distance (km)</label>
+                        <input type="number" step="0.01" className="input" placeholder="optional"
+                          value={cb.distanceKm || ''} onChange={e => updateCardioBlock(exIdx, 'distanceKm', e.target.value)}/>
                       </div>
                       <div>
-                        <label className="label text-xs">RPE</label>
-                        <input type="number" min="1" max="10" step="0.5" className="input" placeholder="optional"
-                          value={cb.rpe || ''} inputMode="decimal" onChange={e => updateCardioBlock(exIdx, 'rpe', e.target.value)}/>
+                        <label className="label text-xs">Avg HR</label>
+                        <input type="number" className="input" placeholder="optional"
+                          value={cb.avgHr || ''} onChange={e => updateCardioBlock(exIdx, 'avgHr', e.target.value)}/>
                       </div>
                     </div>
                   </div>
@@ -696,8 +792,8 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
               // ── Strength block ──
               const prevBest = getPrevBest(ex.name)
               const totalSets = ex.sets.length
-              const tonnage = ex.sets.reduce((a, s) => a + s.weight * s.reps, 0)
-              const bestE1rm = totalSets ? Math.max(...ex.sets.map(s => epley(s.weight, s.reps))) : null
+              const tonnage = ex.sets.filter(s => !s.warmup).reduce((a, s) => a + s.weight * s.reps, 0)
+              const bestE1rm = totalSets ? Math.max(...ex.sets.filter(s => !s.warmup).map(s => epley(s.weight, s.reps))) : null
 
               return (
                 <div key={exIdx} className="border border-border/40 rounded-xl overflow-hidden">
@@ -721,7 +817,7 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                     {prevBest && (
                       <div className="flex items-center gap-1.5 text-xs text-muted bg-surfaceAlt/60 rounded-lg px-2.5 py-1.5 mb-3">
                         <Trophy size={11} className="text-warn shrink-0"/>
-                        <span>Best: <span className="text-text font-medium">{prevBest.weight} kg × {prevBest.reps}</span> @ RPE {prevBest.rpe || '?'} — e1RM <span className="text-accent">{prevBest.e1rm.toFixed(1)}</span> ({prevBest.date})</span>
+                        <span>Best: <span className="text-text font-medium">{prevBest.weight} kg × {prevBest.reps}</span> @ RPE {prevBest.rpe || '?'} — e1RM <span className="text-accent">{prevBest.e1rm.toFixed(1)}</span></span>
                       </div>
                     )}
 
@@ -741,12 +837,12 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                           </thead>
                           <tbody>
                             {ex.sets.map((s, si) => (
-                              <tr key={si} className="border-t border-border/20">
+                              <tr key={si} className={`border-t border-border/20 ${s.warmup ? 'opacity-60' : ''}`}>
                                 <td className="py-1.5 text-muted text-xs">{si + 1}{s.warmup ? ' W' : ''}</td>
                                 <td className="py-1.5 font-medium">{s.weight}</td>
                                 <td className="py-1.5">{s.reps}</td>
                                 <td className="py-1.5 text-muted">{s.rpe}</td>
-                                <td className="py-1.5 text-accent">{epley(s.weight, s.reps).toFixed(1)}</td>
+                                <td className="py-1.5 text-accent">{s.warmup ? '—' : epley(s.weight, s.reps).toFixed(1)}</td>
                                 <td className="py-1.5">
                                   <button onClick={() => removeSet(exIdx, si)} className="btn-ghost p-0.5 text-muted hover:text-danger">
                                     <Trash2 size={12}/>
@@ -757,7 +853,7 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                           </tbody>
                         </table>
                         {bestE1rm && (
-                          <div className="flex gap-4 text-xs text-muted pt-2 border-t border-border/20 mt-1">
+                          <div className="flex gap-4 text-xs text-muted pt-1.5 border-t border-border/20 mt-1">
                             <span>Best e1RM: <span className="text-accent font-medium">{bestE1rm.toFixed(1)} kg</span></span>
                             <span>Tonnage: <span className="text-accent font-medium">{tonnage.toFixed(0)} kg</span></span>
                           </div>
@@ -765,15 +861,15 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                       </div>
                     )}
 
-                    {/* Add set row */}
+                    {/* Add set row — clean 3-col grid */}
                     <div className="space-y-2">
                       <div className="grid grid-cols-3 gap-2">
                         <div>
-                          <label className="label">Weight (kg)</label>
+                          <label className="label">kg</label>
                           <input
                             type="number" step="0.5" min="0"
                             inputMode="decimal"
-                            className="input text-center text-lg font-bold"
+                            className="input text-center text-xl font-bold py-3"
                             placeholder="0"
                             value={sf.weight}
                             onChange={e => updateSetForm(exIdx, 'weight', e.target.value)}
@@ -786,7 +882,7 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                             id={`reps-${exIdx}`}
                             type="number" min="1" max="100"
                             inputMode="numeric"
-                            className="input text-center text-lg font-bold"
+                            className="input text-center text-xl font-bold py-3"
                             placeholder="0"
                             value={sf.reps}
                             onChange={e => updateSetForm(exIdx, 'reps', e.target.value)}
@@ -796,7 +892,7 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                         <div>
                           <label className="label">RPE</label>
                           <select
-                            className="input text-center"
+                            className="input text-center py-3"
                             value={sf.rpe}
                             onChange={e => updateSetForm(exIdx, 'rpe', e.target.value)}
                           >
@@ -808,15 +904,15 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                         <button
                           onClick={() => addSet(exIdx)}
                           disabled={!sf.weight || !sf.reps}
-                          className="btn-primary flex-1 flex items-center justify-center gap-1.5 py-2.5 text-base disabled:opacity-40"
+                          className="btn-primary flex-1 py-3 text-base font-semibold flex items-center justify-center gap-2 disabled:opacity-40"
                         >
-                          <Plus size={16}/> Add Set
+                          <Plus size={18}/> Log Set {ex.sets.length + 1}
                         </button>
                         <label className="flex items-center gap-2 bg-surfaceAlt rounded-xl px-3 cursor-pointer select-none shrink-0">
                           <input type="checkbox" className="w-4 h-4 accent-accent"
                             checked={sf.warmup || false}
                             onChange={e => updateSetForm(exIdx, 'warmup', e.target.checked)}/>
-                          <span className="text-xs text-muted">Warm-up</span>
+                          <span className="text-xs text-muted">W-up</span>
                         </label>
                       </div>
                     </div>
@@ -827,69 +923,38 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
           </div>
         )}
 
-        {/* Exercise browser overlay */}
-        {showBrowser && (
-          <div className="fixed inset-0 z-50 bg-bg/95 overflow-y-auto px-4 py-4">
-            <ExerciseBrowser
-              uid={uid}
-              onAdd={(name) => { addExercise(name); setShowBrowser(false) }}
-              onClose={() => setShowBrowser(false)}
-            />
+        {/* Session notes — collapsed by default to save space */}
+        <details className="mb-3">
+          <summary className="text-xs text-muted cursor-pointer select-none py-1">Session notes &amp; RPE (optional)</summary>
+          <div className="mt-2 space-y-3">
+            <div>
+              <label className="label">Notes</label>
+              <div className="flex gap-2">
+                <input type="text" className="input" placeholder="Optional notes on the session"
+                  value={session.notes} onChange={e => setSession(p => ({ ...p, notes: e.target.value }))}/>
+                <MicButton onTranscript={t => setSession(p => ({ ...p, notes: p.notes ? p.notes + ' ' + t : t }))}/>
+              </div>
+            </div>
+            <div>
+              <label className="label">Session RPE</label>
+              <div className="flex gap-2 flex-wrap">
+                {[6, 7, 7.5, 8, 8.5, 9, 9.5, 10].map(r => (
+                  <button key={r} type="button"
+                    onClick={() => setSession(p => ({ ...p, sessionRpe: r }))}
+                    className={`px-3 py-2 rounded-lg border text-sm transition-colors ${session.sessionRpe === r ? 'bg-accent text-bg border-accent font-semibold' : 'bg-surfaceAlt text-muted border-border/30'}`}>
+                    {r}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-        )}
+        </details>
 
-        {/* Add exercise row */}
-        <div className="mb-3">
-          <label className="label">Add exercise</label>
-          <div className="flex gap-2">
-            <div className="flex-1"><ExercisePicker uid={uid} onAdd={addExercise}/></div>
-            <button
-              onClick={() => setShowBrowser(true)}
-              className="btn-secondary text-xs flex items-center gap-1 shrink-0"
-              title="Browse exercises by muscle group with weight suggestions"
-            >
-              <Dumbbell size={13}/> Browse
-            </button>
-          </div>
-        </div>
-
-        {/* Add cardio block */}
-        <button
-          onClick={addCardioBlock}
-          className="btn-secondary text-sm flex items-center gap-1.5 w-full justify-center mb-4"
-        >
-          <HeartPulse size={14} className="text-success"/> Add cardio block
-        </button>
-
-        {/* Session notes */}
-        <div className="mb-4">
-          <label className="label">Session notes</label>
-          <div className="flex gap-2">
-            <input type="text" className="input" placeholder="Optional"
-              value={session.notes} onChange={e => setSession(p => ({ ...p, notes: e.target.value }))}/>
-            <MicButton onTranscript={t => setSession(p => ({ ...p, notes: p.notes ? p.notes + ' ' + t : t }))}/>
-          </div>
-        </div>
-
-        {/* Session RPE */}
-        <div className="mb-3">
-          <label className="label">Session RPE <span className="text-muted">(overall feel, optional)</span></label>
-          <div className="flex gap-2 flex-wrap">
-            {[6, 7, 7.5, 8, 8.5, 9, 9.5, 10].map(r => (
-              <button key={r} type="button"
-                onClick={() => setSession(p => ({ ...p, sessionRpe: r }))}
-                className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${session.sessionRpe === r ? 'bg-accent text-bg border-accent' : 'bg-surfaceAlt text-muted border-border/30'}`}>
-                {r}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Save / template */}
-        <div className="flex gap-2 flex-wrap">
+        {/* Save */}
+        <div className="flex gap-2">
           <button
             onClick={saveSession}
-            className="btn-primary"
+            className="btn-primary flex-1 py-3 text-base font-semibold"
             disabled={saving || (!session.exercises.some(ex => ex.type === 'strength' && ex.sets.length > 0) && !session.exercises.some(ex => ex.type === 'cardio' && ex.cardio?.durationMin))}
           >
             {saving ? 'Saving...' : editId ? 'Update Session' : 'Save Session'}
@@ -900,6 +965,7 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
     </div>
   )
 }
+
 
 function SaveTemplateButton({ uid, session }) {
   const [name, setName] = useState('')
