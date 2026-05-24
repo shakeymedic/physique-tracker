@@ -294,6 +294,10 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
   const [showCustomForm, setShowCustomForm] = useState(false)
   const [customExForm, setCustomExForm] = useState({ name: '', category: 'strength' })
   const [customSaving, setCustomSaving] = useState(false)
+  const [lockedExercises, setLockedExercises] = useState({}) // exIdx -> true when locked/collapsed
+
+  const toggleLock = (exIdx) => setLockedExercises(prev => ({ ...prev, [exIdx]: !prev[exIdx] }))
+  const unlockAll = () => setLockedExercises({})
 
   const emptySession = () => ({
     date: today(),
@@ -396,6 +400,15 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
   const removeExercise = (idx) => {
     setSession(prev => ({ ...prev, exercises: prev.exercises.filter((_, i) => i !== idx) }))
     setSetForms(prev => {
+      const n = {}
+      Object.entries(prev).forEach(([k, v]) => {
+        const ki = parseInt(k)
+        if (ki < idx) n[ki] = v
+        else if (ki > idx) n[ki - 1] = v
+      })
+      return n
+    })
+    setLockedExercises(prev => {
       const n = {}
       Object.entries(prev).forEach(([k, v]) => {
         const ki = parseInt(k)
@@ -748,70 +761,97 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
               // ── Cardio block ──
               if (ex.type === 'cardio') {
                 const cb = ex.cardio || {}
+                const isLocked = !!lockedExercises[exIdx]
+                const cardioSummary = [cb.type, cb.durationMin ? `${cb.durationMin} min` : null, cb.kcal ? `${cb.kcal} kcal` : null].filter(Boolean).join(' · ')
+
                 return (
-                  <div key={exIdx} className="border border-success/30 rounded-xl overflow-hidden">
+                  <div key={exIdx} className={`border rounded-xl overflow-hidden transition-all ${isLocked ? 'border-success/20 opacity-80' : 'border-success/30'}`}>
                     <div className="flex items-center justify-between px-3 py-2.5 bg-success/10">
-                      <div className="flex items-center gap-2">
-                        <HeartPulse size={14} className="text-success"/>
-                        <span className="text-sm font-semibold text-success">Cardio</span>
-                      </div>
-                      <button onClick={() => removeExercise(exIdx)} className="btn-ghost p-1 text-danger"><X size={14}/></button>
+                      <button onClick={() => toggleLock(exIdx)} className="flex items-center gap-2 flex-1 text-left min-w-0">
+                        <HeartPulse size={14} className="text-success shrink-0"/>
+                        <span className="text-sm font-semibold text-success">{cb.type || 'Cardio'}</span>
+                        {isLocked && <span className="text-xs text-muted ml-1">{cardioSummary}</span>}
+                        {isLocked
+                          ? <span className="text-xs bg-success/20 text-success rounded-full px-2 py-0.5 ml-auto shrink-0">Done &#10003;</span>
+                          : <span className="text-xs text-muted ml-auto shrink-0">tap to collapse</span>
+                        }
+                      </button>
+                      {!isLocked && <button onClick={() => removeExercise(exIdx)} className="btn-ghost p-1 text-danger ml-2 shrink-0"><X size={14}/></button>}
                     </div>
-                    <div className="p-3 grid grid-cols-2 gap-2">
-                      <div className="col-span-2">
-                        <label className="label text-xs">Activity</label>
-                        <select className="input" value={cb.type || 'Running'} onChange={e => updateCardioBlock(exIdx, 'type', e.target.value)}>
-                          {CARDIO_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                        </select>
+                    {!isLocked && (
+                      <div className="p-3 grid grid-cols-2 gap-2">
+                        <div className="col-span-2">
+                          <label className="label text-xs">Activity</label>
+                          <select className="input" value={cb.type || 'Running'} onChange={e => updateCardioBlock(exIdx, 'type', e.target.value)}>
+                            {CARDIO_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="label text-xs">Duration (min) *</label>
+                          <input type="number" className="input" placeholder="30"
+                            value={cb.durationMin || ''} onChange={e => updateCardioBlock(exIdx, 'durationMin', e.target.value)}/>
+                        </div>
+                        <div>
+                          <label className="label text-xs">Kcal burned</label>
+                          <input type="number" className="input" placeholder="optional"
+                            value={cb.kcal || ''} onChange={e => updateCardioBlock(exIdx, 'kcal', e.target.value)}/>
+                        </div>
+                        <div>
+                          <label className="label text-xs">Distance (km)</label>
+                          <input type="number" step="0.01" className="input" placeholder="optional"
+                            value={cb.distanceKm || ''} onChange={e => updateCardioBlock(exIdx, 'distanceKm', e.target.value)}/>
+                        </div>
+                        <div>
+                          <label className="label text-xs">Avg HR</label>
+                          <input type="number" className="input" placeholder="optional"
+                            value={cb.avgHr || ''} onChange={e => updateCardioBlock(exIdx, 'avgHr', e.target.value)}/>
+                        </div>
+                        <div className="col-span-2">
+                          <button onClick={() => toggleLock(exIdx)} className="btn-primary w-full flex items-center justify-center gap-2">
+                            <CheckCircle size={15}/> Done with cardio
+                          </button>
+                        </div>
                       </div>
-                      <div>
-                        <label className="label text-xs">Duration (min) *</label>
-                        <input type="number" className="input" placeholder="30"
-                          value={cb.durationMin || ''} onChange={e => updateCardioBlock(exIdx, 'durationMin', e.target.value)}/>
-                      </div>
-                      <div>
-                        <label className="label text-xs">Kcal burned</label>
-                        <input type="number" className="input" placeholder="optional"
-                          value={cb.kcal || ''} onChange={e => updateCardioBlock(exIdx, 'kcal', e.target.value)}/>
-                      </div>
-                      <div>
-                        <label className="label text-xs">Distance (km)</label>
-                        <input type="number" step="0.01" className="input" placeholder="optional"
-                          value={cb.distanceKm || ''} onChange={e => updateCardioBlock(exIdx, 'distanceKm', e.target.value)}/>
-                      </div>
-                      <div>
-                        <label className="label text-xs">Avg HR</label>
-                        <input type="number" className="input" placeholder="optional"
-                          value={cb.avgHr || ''} onChange={e => updateCardioBlock(exIdx, 'avgHr', e.target.value)}/>
-                      </div>
-                    </div>
+                    )}
                   </div>
                 )
               }
 
               // ── Strength block ──
+              const isLocked = !!lockedExercises[exIdx]
               const prevBest = getPrevBest(ex.name)
               const totalSets = ex.sets.length
               const tonnage = ex.sets.filter(s => !s.warmup).reduce((a, s) => a + s.weight * s.reps, 0)
               const bestE1rm = totalSets ? Math.max(...ex.sets.filter(s => !s.warmup).map(s => epley(s.weight, s.reps))) : null
+              const workingSets = ex.sets.filter(s => !s.warmup).length
 
               return (
-                <div key={exIdx} className="border border-border/40 rounded-xl overflow-hidden">
-                  {/* Exercise header */}
+                <div key={exIdx} className={`border rounded-xl overflow-hidden transition-all ${
+                  isLocked ? 'border-accent/20 opacity-85' : 'border-border/40'
+                }`}>
+                  {/* Exercise header — tap to collapse/expand when locked */}
                   <div className="relative flex items-center justify-between px-3 py-2.5 bg-surfaceAlt">
-                    <div className="flex items-center gap-2 min-w-0">
+                    <button
+                      onClick={() => isLocked && toggleLock(exIdx)}
+                      className={`flex items-center gap-2 min-w-0 flex-1 text-left ${isLocked ? 'cursor-pointer' : 'cursor-default'}`}
+                    >
                       <Dumbbell size={14} className="text-accent shrink-0"/>
                       <span className="font-semibold text-text truncate">{ex.name}</span>
-                      <ExerciseTips exerciseName={ex.name} allExercises={allExercises}/>
-                    </div>
+                      {!isLocked && <ExerciseTips exerciseName={ex.name} allExercises={allExercises}/>}
+                    </button>
                     <div className="flex items-center gap-2 shrink-0">
                       {totalSets > 0 && (
-                        <span className="text-xs text-muted">{totalSets} sets · {tonnage.toFixed(0)} kg</span>
+                        <span className="text-xs text-muted">{workingSets} sets · {tonnage.toFixed(0)} kg</span>
                       )}
-                      <button onClick={() => removeExercise(exIdx)} className="btn-ghost p-1 text-danger"><X size={14}/></button>
+                      {isLocked ? (
+                        <span className="text-xs bg-accent/20 text-accent rounded-full px-2 py-0.5">Done ✓</span>
+                      ) : (
+                        <button onClick={() => removeExercise(exIdx)} className="btn-ghost p-1 text-danger"><X size={14}/></button>
+                      )}
                     </div>
                   </div>
 
+                  {!isLocked && (
                   <div className="p-3">
                     {/* Previous best */}
                     {prevBest && (
@@ -916,7 +956,17 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                         </label>
                       </div>
                     </div>
+                    {/* Done button — collapses exercise to read-only summary */}
+                    {totalSets > 0 && (
+                      <button
+                        onClick={() => toggleLock(exIdx)}
+                        className="btn-secondary w-full mt-2 flex items-center justify-center gap-2 text-accent border-accent/30"
+                      >
+                        <CheckCircle size={15}/> Done with {ex.name}
+                      </button>
+                    )}
                   </div>
+                  )}
                 </div>
               )
             })}
