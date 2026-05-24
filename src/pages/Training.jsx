@@ -19,6 +19,7 @@ import {
 import { TodChip, TodSelect, detectTimeOfDay } from '../lib/timeOfDay.jsx'
 import { saveDraft, loadDraft, clearDraft, draftAgo } from '../lib/draft.js'
 import { ROUTINES } from '../training/routines.js'
+import ExerciseBrowser from './ExerciseBrowser.jsx'
 import { STRETCHES } from '../training/stretches.js'
 import { PROGRAMS, getProgramById, resolveProgram, getTodayWorkout, computeWeekNumber } from '../training/programs.js'
 import RoutineTimer from '../components/RoutineTimer.jsx'
@@ -289,6 +290,7 @@ function ExercisePicker({ uid, onAdd }) {
 function LogTab({ uid, initialEditLift, onEditStart }) {
   const DRAFT_KEY = `pt-draft-training-${uid}`
   const { all: allExercises } = useExerciseList(uid)
+  const [showBrowser, setShowBrowser] = useState(false)
 
   const emptySession = () => ({
     date: today(),
@@ -819,10 +821,30 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
           </div>
         )}
 
+        {/* Exercise browser overlay */}
+        {showBrowser && (
+          <div className="fixed inset-0 z-50 bg-bg/95 overflow-y-auto px-4 py-4">
+            <ExerciseBrowser
+              uid={uid}
+              onAdd={(name) => { addExercise(name); setShowBrowser(false) }}
+              onClose={() => setShowBrowser(false)}
+            />
+          </div>
+        )}
+
         {/* Add exercise row */}
         <div className="mb-3">
           <label className="label">Add exercise</label>
-          <ExercisePicker uid={uid} onAdd={addExercise}/>
+          <div className="flex gap-2">
+            <div className="flex-1"><ExercisePicker uid={uid} onAdd={addExercise}/></div>
+            <button
+              onClick={() => setShowBrowser(true)}
+              className="btn-secondary text-xs flex items-center gap-1 shrink-0"
+              title="Browse exercises by muscle group with weight suggestions"
+            >
+              <Dumbbell size={13}/> Browse
+            </button>
+          </div>
         </div>
 
         {/* Add cardio block */}
@@ -1743,6 +1765,59 @@ function ProgramBuilder({ uid, initial = null, onSave, onCancel }) {
   )
 }
 
+// ── WorkingWeightRow ─────────────────────────────────────────────────────
+function WorkingWeightRow({ exName, manual, auto, activeProgram, uid, onSave }) {
+  const displayWeight = manual?.weight || auto?.weight || null
+  const displayDate = manual?.date || auto?.date || null
+  const [editing, setEditing] = useState(false)
+  const [editVal, setEditVal] = useState(String(displayWeight || ''))
+
+  const saveWeight = async () => {
+    const kg = parseFloat(editVal)
+    if (isNaN(kg) || kg <= 0) return
+    const updated = {
+      ...activeProgram,
+      workingWeights: {
+        ...(activeProgram.workingWeights || {}),
+        [exName]: { weight: kg, date: format(new Date(), 'yyyy-MM-dd') },
+      },
+    }
+    await saveSettings(uid, { activeProgram: updated })
+    onSave(updated)
+    setEditing(false)
+  }
+
+  return (
+    <div className="flex items-center justify-between bg-surfaceAlt rounded-xl px-3 py-2">
+      <div className="min-w-0">
+        <div className="text-sm text-text font-medium truncate">{exName}</div>
+        {displayDate && <div className="text-xs text-muted">Last: {displayDate}</div>}
+      </div>
+      {editing ? (
+        <div className="flex items-center gap-1 shrink-0">
+          <input type="number" step="0.5" inputMode="decimal"
+            className="input w-20 text-sm text-center"
+            value={editVal} onChange={e => setEditVal(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && saveWeight()}
+            autoFocus
+          />
+          <span className="text-xs text-muted">kg</span>
+          <button onClick={saveWeight} className="btn-primary text-xs px-2">✓</button>
+          <button onClick={() => setEditing(false)} className="btn-ghost text-xs">✕</button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-accent font-semibold">
+            {displayWeight ? `${displayWeight} kg` : '—'}
+          </span>
+          <button onClick={() => { setEditVal(String(displayWeight || '')); setEditing(true) }}
+            className="btn-ghost p-1"><Pencil size={12}/></button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Programs Tab ──────────────────────────────────────────────────────────────
 function ProgramsTab({ uid }) {
   const [settings, setSettings] = useState({})
@@ -2022,58 +2097,17 @@ function ProgramsTab({ uid }) {
               </div>
               <p className="text-xs text-muted mb-3">Your current working weight per exercise. Updates automatically from your sessions, or edit manually.</p>
               <div className="space-y-2">
-                {allProgramExes.map(exName => {
-                  const manual = workingWeights[exName]
-                  const auto = lastUsed[exName]
-                  const displayWeight = manual?.weight || auto?.weight || null
-                  const displayDate = manual?.date || auto?.date || null
-                  const [editing, setEditing] = useState(false)
-                  const [editVal, setEditVal] = useState(String(displayWeight || ''))
-
-                  const saveWeight = async () => {
-                    const kg = parseFloat(editVal)
-                    if (isNaN(kg) || kg <= 0) return
-                    const updated = {
-                      ...activeProgram,
-                      workingWeights: {
-                        ...(activeProgram.workingWeights || {}),
-                        [exName]: { weight: kg, date: format(new Date(), 'yyyy-MM-dd') }
-                      }
-                    }
-                    await saveSettings(uid, { activeProgram: updated })
-                    setSettings(prev => ({ ...prev, activeProgram: updated }))
-                    setEditing(false)
-                  }
-
-                  return (
-                    <div key={exName} className="flex items-center justify-between bg-surfaceAlt rounded-xl px-3 py-2">
-                      <div className="min-w-0">
-                        <div className="text-sm text-text font-medium truncate">{exName}</div>
-                        {displayDate && <div className="text-xs text-muted">Last: {displayDate}</div>}
-                      </div>
-                      {editing ? (
-                        <div className="flex items-center gap-1 shrink-0">
-                          <input type="number" step="0.5" inputMode="decimal"
-                            className="input w-20 text-sm text-center"
-                            value={editVal} onChange={e => setEditVal(e.target.value)}
-                            onKeyDown={e => e.key === 'Enter' && saveWeight()}
-                          />
-                          <span className="text-xs text-muted">kg</span>
-                          <button onClick={saveWeight} className="btn-primary text-xs px-2">✓</button>
-                          <button onClick={() => setEditing(false)} className="btn-ghost text-xs">✕</button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-accent font-semibold">
-                            {displayWeight ? `${displayWeight} kg` : '—'}
-                          </span>
-                          <button onClick={() => { setEditVal(String(displayWeight || '')); setEditing(true) }}
-                            className="btn-ghost p-1"><Pencil size={12}/></button>
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
+                {allProgramExes.map(exName => (
+                  <WorkingWeightRow
+                    key={exName}
+                    exName={exName}
+                    manual={workingWeights[exName]}
+                    auto={lastUsed[exName]}
+                    activeProgram={activeProgram}
+                    uid={uid}
+                    onSave={(updated) => setSettings(prev => ({ ...prev, activeProgram: updated }))}
+                  />
+                ))}
               </div>
             </div>
           )
