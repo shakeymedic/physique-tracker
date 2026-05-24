@@ -501,7 +501,7 @@ export default function Today() {
                     }`}
                     style={{ height: `${Math.max(2, pct * 28)}px` }}
                   />
-                  <span className="text-[9px] text-muted">{format(subDays(new Date(), 6 - i), 'EEE').slice(0,1)}</span>
+                  <span className="text-[11px] text-muted">{format(subDays(new Date(), 6 - i), 'EEE').slice(0,1)}</span>
                 </div>
               )
             })}

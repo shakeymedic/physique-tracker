@@ -383,7 +383,7 @@ function TodayTab({ uid }) {
 
       {/* H: Sticky macro mini-bar */}
       {hasTargets && (
-        <div className="sticky top-0 z-10 bg-bg/95 backdrop-blur border-b border-border/20 -mx-4 px-4 py-2 flex gap-4 text-xs">
+        <div className="sticky top-0 z-10 bg-bg/95 backdrop-blur border-b border-border/20 py-2 flex gap-4 text-xs overflow-hidden">
           <span className={totals.kcal > (targets.kcal || 2000) ? 'text-danger font-semibold' : 'text-muted'}>
             Kcal: <span className="text-text font-medium">{Math.round(totals.kcal)}</span>/{targets.kcal || 2000}
           </span>
@@ -546,7 +546,7 @@ function TodayTab({ uid }) {
 
                       {/* Live macro preview */}
                       {preview && (
-                        <div className="bg-bg rounded-xl px-3 py-2 grid grid-cols-4 gap-2 text-center">
+                        <div className="bg-bg rounded-xl px-3 py-2 grid grid-cols-2 gap-2 text-center">
                           {[
                             { label: 'Kcal', value: preview.kcal },
                             { label: 'Protein', value: `${preview.protein}g` },

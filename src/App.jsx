@@ -109,7 +109,7 @@ export default function App() {
   if (!user) return <Login />
 
   return (
-    <div className="min-h-screen pb-20">
+    <div className="min-h-screen" style={{ paddingBottom: 'max(5rem, calc(5rem + env(safe-area-inset-bottom)))' }}>
       {!isOnline && (
         <div className="bg-warn/90 text-bg text-xs text-center py-1 px-4 font-medium sticky top-0 z-30">
           Offline — data will sync when reconnected
@@ -136,7 +136,7 @@ export default function App() {
         <DynamicNav settings={navSettings}/>
       </header>
 
-      <main className="max-w-screen-2xl mx-auto px-4 py-4">
+      <main className="max-w-screen-2xl mx-auto px-3 sm:px-4 py-4">
         <Routes>
           <Route path="/" element={<Today />} />
           <Route path="/insights" element={<Insights />} />

@@ -727,8 +727,8 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
 
                     {/* Logged sets table */}
                     {ex.sets.length > 0 && (
-                      <div className="mb-3">
-                        <table className="w-full text-sm">
+                      <div className="mb-3 overflow-x-auto -mx-1 px-1">
+                        <table className="w-full text-sm min-w-[280px]">
                           <thead>
                             <tr className="text-xs text-muted">
                               <th className="text-left pb-1 w-6">#</th>
@@ -765,54 +765,60 @@ function LogTab({ uid, initialEditLift, onEditStart }) {
                       </div>
                     )}
 
-                    {/* Add set row — always visible */}
-                    <div className="flex gap-2 items-end">
-                      <div className="flex-1">
-                        <label className="label text-xs">kg</label>
-                        <input
-                          type="number" step="0.5" min="0"
-                          className="input text-center font-medium"
-                          placeholder="0"
-                          value={sf.weight}
-                          inputMode="decimal" onChange={e => updateSetForm(exIdx, 'weight', e.target.value)}
-                          onKeyDown={e => { if (e.key === 'Enter') { document.getElementById(`reps-${exIdx}`)?.focus() } }}
-                        />
+                    {/* Add set row */}
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <label className="label">Weight (kg)</label>
+                          <input
+                            type="number" step="0.5" min="0"
+                            inputMode="decimal"
+                            className="input text-center text-lg font-bold"
+                            placeholder="0"
+                            value={sf.weight}
+                            onChange={e => updateSetForm(exIdx, 'weight', e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') document.getElementById(`reps-${exIdx}`)?.focus() }}
+                          />
+                        </div>
+                        <div>
+                          <label className="label">Reps</label>
+                          <input
+                            id={`reps-${exIdx}`}
+                            type="number" min="1" max="100"
+                            inputMode="numeric"
+                            className="input text-center text-lg font-bold"
+                            placeholder="0"
+                            value={sf.reps}
+                            onChange={e => updateSetForm(exIdx, 'reps', e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') addSet(exIdx) }}
+                          />
+                        </div>
+                        <div>
+                          <label className="label">RPE</label>
+                          <select
+                            className="input text-center"
+                            value={sf.rpe}
+                            onChange={e => updateSetForm(exIdx, 'rpe', e.target.value)}
+                          >
+                            {RPE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                          </select>
+                        </div>
                       </div>
-                      <div className="flex-1">
-                        <label className="label text-xs">Reps</label>
-                        <input
-                          id={`reps-${exIdx}`}
-                          type="number" min="1" max="100"
-                          className="input text-center font-medium"
-                          placeholder="0"
-                          value={sf.reps}
-                          onChange={e => updateSetForm(exIdx, 'reps', e.target.value)}
-                          onKeyDown={e => { if (e.key === 'Enter') addSet(exIdx) }}
-                        />
-                      </div>
-                      <div className="w-20 shrink-0">
-                        <label className="label text-xs">RPE</label>
-                        <select
-                          className="input text-center"
-                          value={sf.rpe}
-                          onChange={e => updateSetForm(exIdx, 'rpe', e.target.value)}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => addSet(exIdx)}
+                          disabled={!sf.weight || !sf.reps}
+                          className="btn-primary flex-1 flex items-center justify-center gap-1.5 py-2.5 text-base disabled:opacity-40"
                         >
-                          {RPE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
-                        </select>
+                          <Plus size={16}/> Add Set
+                        </button>
+                        <label className="flex items-center gap-2 bg-surfaceAlt rounded-xl px-3 cursor-pointer select-none shrink-0">
+                          <input type="checkbox" className="w-4 h-4 accent-accent"
+                            checked={sf.warmup || false}
+                            onChange={e => updateSetForm(exIdx, 'warmup', e.target.checked)}/>
+                          <span className="text-xs text-muted">Warm-up</span>
+                        </label>
                       </div>
-                      <div className="flex flex-col items-center gap-1 shrink-0">
-                        <label className="label text-xs">W-up</label>
-                        <input type="checkbox" className="w-4 h-4 accent-accent"
-                          checked={sf.warmup || false}
-                          onChange={e => updateSetForm(exIdx, 'warmup', e.target.checked)}/>
-                      </div>
-                      <button
-                        onClick={() => addSet(exIdx)}
-                        disabled={!sf.weight || !sf.reps}
-                        className="btn-primary shrink-0 flex items-center gap-1 disabled:opacity-40"
-                      >
-                        <Plus size={14}/> Set
-                      </button>
                     </div>
                   </div>
                 </div>
@@ -1709,23 +1715,30 @@ function ProgramBuilder({ uid, initial = null, onSave, onCancel }) {
       {/* Weekly schedule */}
       <div className="card">
         <div className="card-title flex items-center gap-2"><Calendar size={16} className="text-accent"/> Weekly Schedule</div>
-        <p className="text-xs text-muted mb-3">Assign a workout to each day, or leave as rest. Only matters in Fixed days mode.</p>
-        <div className="grid grid-cols-7 gap-1">
-          {DAY_LABELS.map((day, i) => (
-            <div key={i} className="flex flex-col items-center gap-1">
-              <div className="text-xs text-muted">{day}</div>
-              <select
-                className="input text-xs p-1 text-center w-full"
-                value={schedule[i]}
-                onChange={e => setSchedule(prev => prev.map((s, j) => j === i ? e.target.value : s))}
-              >
-                <option value="rest">Rest</option>
-                {workouts.filter(w => w.name.trim()).map(w => (
-                  <option key={w.key} value={w.key}>{w.name}</option>
-                ))}
-              </select>
-            </div>
-          ))}
+        <p className="text-xs text-muted mb-3">Tap a day to assign a workout. Only matters in Fixed days mode.</p>
+        <div className="space-y-2">
+          {DAY_LABELS.map((day, i) => {
+            const assigned = schedule[i]
+            const isRest = !assigned || assigned === 'rest'
+            const namedWorkouts = workouts.filter(w => w.name.trim())
+            return (
+              <div key={i} className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
+                  isRest ? 'bg-surfaceAlt text-muted' : 'bg-accent/20 text-accent'
+                }`}>{day}</div>
+                <select
+                  className="input flex-1"
+                  value={assigned || 'rest'}
+                  onChange={e => setSchedule(prev => prev.map((s, j) => j === i ? e.target.value : s))}
+                >
+                  <option value="rest">Rest</option>
+                  {namedWorkouts.map(w => (
+                    <option key={w.key} value={w.key}>{w.name}</option>
+                  ))}
+                </select>
+              </div>
+            )
+          })}
         </div>
       </div>
 

@@ -960,7 +960,7 @@ function LocalRemindersSection({ uid }) {
       <div className="space-y-3 mb-3">
         {fields.map(f => (
           <div key={f.key} className="flex items-center gap-3">
-            <label className="text-sm text-text w-44 shrink-0">{f.label}</label>
+            <label className="text-sm text-text flex-1">{f.label}</label>
             <input type="time" className="input w-32"
               value={form[f.key] || ''}
               onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}/>
